@@ -94,8 +94,10 @@ static uint32_t palette_hash(unsigned p)
 }
 
 /* Make sure the GPU copy of a texture record is current; returns its id. */
-/* Set by sprite_3d around its texture_for call: world sprites (cars, objects)
- * may be replaced from the texture pack and are dumped by GTA2_DUMP_SPRITES. */
+/* Set by sprite_3d around its texture_for call (cars, objects): kept apart in
+ * the cache from the same texture drawn flat. Both world and HUD sprites
+ * (hearts, meters, digits) are dumped by GTA2_DUMP_SPRITES and replaced from
+ * the texture pack. */
 static int g_tex_world;
 
 static int texture_for(uint32_t rec)
@@ -127,7 +129,7 @@ static int texture_for(uint32_t rec)
     }
     uint32_t *up = NULL;
     int uw = (int)w, uh = (int)h;
-    if (g_tex_world && scale > 1) {
+    if (scale > 1) {
         uint64_t hash = texpack_hash(rgba, (int)w, (int)h);
         texpack_dump(hash, rgba, (int)w, (int)h, pal);
         up = texpack_sprite(hash, &uw, &uh);
