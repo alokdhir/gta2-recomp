@@ -65,7 +65,10 @@ static void replay_record(id<MTLCommandBuffer> cb, id<MTLTexture> src)
     NSUInteger w = src.width / 2, h = src.height / 2;
     id<MTLTexture> __strong *slot = &g_replay[g_replay_count % REPLAY_FRAMES];
     if (!*slot || (*slot).width != w || (*slot).height != h) {
-        if (*slot) g_replay_count = 0; /* size changed: start over */
+        if (*slot) { /* size changed: drop every old frame and start over */
+            for (int i = 0; i < REPLAY_FRAMES; i++) g_replay[i] = nil;
+            g_replay_count = 0;
+        }
         slot = &g_replay[g_replay_count % REPLAY_FRAMES];
         MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
                                                                                       width:w height:h mipmapped:NO];

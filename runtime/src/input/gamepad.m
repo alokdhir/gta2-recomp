@@ -25,20 +25,7 @@ static int g_announced;
 
 int d3ddll_player_on_foot(void);
 
-/* The player's facing, in GTA2's units: 0..1439 quarter degrees, 720 = north
- * (up the screen), increasing anticlockwise. Found by snapshotting memory
- * while turning: [0x5E5BC0] is the player's ped (plus a constant), its
- * sprite pointer is at +0x190 and the sprite's rotation at +0x40. Returns
- * NULL whenever the chain doesn't look valid. */
-static int16_t *player_facing(void)
-{
-    uint32_t ped = MEM32(0x5E5BC0u);
-    if (ped < GUEST_HEAP_LO || ped + 0x200u > guest_heap_top()) return NULL;
-    uint32_t spr = MEM32(ped + 0x190u);
-    if (spr < GUEST_HEAP_LO || spr + 0x44u > guest_heap_top()) return NULL;
-    int16_t *a = (int16_t *)XBOX_PTR(spr + 0x40u);
-    return *a >= 0 && *a < 1440 ? a : NULL;
-}
+int16_t *player_facing(void);
 
 /* Stick-direction movement on foot: the player turns to face where the left
  * stick points and walks. Tank controls (left/right turn) stay on the d-pad,

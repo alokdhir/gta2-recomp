@@ -574,16 +574,24 @@ void world3d_sprite_screen(const WSpriteVert q[4], int tex, int blend) { sprite_
 
 static void sprites_place_screen(void)
 {
-    for (int i = 0; i < g_nsv; i++) {
-        if (g_svlift[i] < 0) continue;
-        float w[3];
-        if (!world3d_unproject_zf(g_sv[i].x, g_sv[i].y, g_sv[i].z, w)) {
-            w[0] = w[1] = w[2] = -1000.0f; /* no camera yet: off the map */
+    /* quads are 6 vertices each; a quad with any vertex off in the distance
+     * (tiny 1/depth) or with no camera yet is collapsed rather than drawn as
+     * a long sliver across the screen */
+    for (int q = 0; q + 6 <= g_nsv; q += 6) {
+        if (g_svlift[q] < 0) continue;
+        int bad = 0;
+        float w[6][3];
+        for (int k = 0; k < 6; k++) {
+            SVert *v = &g_sv[q + k];
+            if (!world3d_unproject_zf(v->x, v->y, v->z, w[k]) || w[k][2] < -1.0f || w[k][2] > 9.0f) bad = 1;
         }
-        g_sv[i].x = w[0];
-        g_sv[i].y = w[1];
-        g_sv[i].z = w[2] + g_svlift[i];
-        g_svlift[i] = -1.0f;
+        for (int k = 0; k < 6; k++) {
+            SVert *v = &g_sv[q + k];
+            v->x = bad ? -1000.0f : w[k][0];
+            v->y = bad ? -1000.0f : w[k][1];
+            v->z = bad ? -1000.0f : w[k][2] + g_svlift[q + k];
+            g_svlift[q + k] = -1.0f;
+        }
     }
 }
 

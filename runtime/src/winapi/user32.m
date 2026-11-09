@@ -20,6 +20,7 @@
 #include "video/presenter.h"
 void d3ddll_probe_next_frame(void);
 float d3ddll_player_angle(void);
+int d3ddll_player_on_foot(void);
 #include "platform/keymap.h"
 #include "winapi/imports.h"
 #include "winapi/user32_api.h"
@@ -268,7 +269,8 @@ static void poke_run(uint64_t t)
         if (pk[pos].v != -32768) *(int16_t *)XBOX_PTR(pk[pos].addr) = (int16_t)pk[pos].v; /* -32768: just log */
         float c[3];
         world3d_camera(c);
-        rt_log("poke %08X = %d (now %d) at %llu ms (camera %.2f, %.2f)", pk[pos].addr, pk[pos].v, *(int16_t *)XBOX_PTR(pk[pos].addr), (unsigned long long)t, c[0], c[1]);
+        rt_log("poke %08X = %d (now %d, on foot %d) at %llu ms (camera %.2f, %.2f)", pk[pos].addr, pk[pos].v,
+               *(int16_t *)XBOX_PTR(pk[pos].addr), d3ddll_player_on_foot(), (unsigned long long)t, c[0], c[1]);
         pos++;
     }
 }

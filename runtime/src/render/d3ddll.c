@@ -322,10 +322,27 @@ static int map_prim(uint32_t verts, unsigned n)
  * mode they become real quads in the world; returns 1 if taken. */
 #define SPRITE_VERTS 0x0066FE18u
 
-static float g_near_d = 1e9f, g_near_angle, g_player_angle, g_near_size, g_player_size;
+static float g_player_angle;
+static int g_seen_player, g_on_foot;
 float d3ddll_player_angle(void) { return g_player_angle; }
-/* The sprite under the camera is person-sized (on foot), not a car. */
-int d3ddll_player_on_foot(void) { return world3d_enabled() && g_player_size > 0 && g_player_size < 32; }
+
+/* The player's facing, in GTA2's units: 0..1439 quarter degrees, 720 = north
+ * (up the screen), increasing anticlockwise. Found by snapshotting memory
+ * while turning: [0x5E5BC0] points into the player's ped, its sprite pointer
+ * is at +0x190 and the sprite's rotation at +0x40. NULL if the chain looks
+ * invalid. */
+int16_t *player_facing(void)
+{
+    uint32_t ped = MEM32(0x5E5BC0u);
+    if (ped < GUEST_HEAP_LO || ped + 0x200u > guest_heap_top()) return NULL;
+    uint32_t spr = MEM32(ped + 0x190u);
+    if (spr < GUEST_HEAP_LO || spr + 0x44u > guest_heap_top()) return NULL;
+    int16_t *a = (int16_t *)XBOX_PTR(spr + 0x40u);
+    return *a >= 0 && *a < 1440 ? a : NULL;
+}
+
+/* On foot = last frame drew the player's own ped sprite (3D renderer only). */
+int d3ddll_player_on_foot(void) { return world3d_enabled() && g_on_foot; }
 
 static int sprite_3d(uint32_t flags, uint32_t rec, uint32_t verts, uint8_t shade)
 {
@@ -351,16 +368,19 @@ static int sprite_3d(uint32_t flags, uint32_t rec, uint32_t verts, uint8_t shade
         q[i] = (WSpriteVert){ w[0], w[1], w[2], f[6] / tw, f[7] / th, col };
     }
     world3d_sprite(q, tex, (int)blend_for(flags));
-    /* debug: facing of the sprite nearest the camera (the player on foot) */
+    /* on-foot detection: is the player's own ped sprite (matched by facing) drawn? */
     {
         float cam[3];
-        if (world3d_camera(cam)) {
+        if (world3d_camera(cam) && (tw > th ? tw : th) < 32) {
             float cx = (q[0].x + q[2].x) * 0.5f - cam[0], cy = (q[0].y + q[2].y) * 0.5f - cam[1];
-            float d = cx * cx + cy * cy;
-            if (d < g_near_d) {
-                g_near_d = d;
-                g_near_angle = atan2f(q[1].y - q[0].y, q[1].x - q[0].x) * 57.29578f;
-                g_near_size = tw > th ? tw : th;
+            if (cx * cx + cy * cy < 9.0f) {
+                float a = atan2f(q[1].y - q[0].y, q[1].x - q[0].x) * 57.29578f;
+                int v = (int)lroundf(720.0f - 4.0f * (a - 180.0f)) % 1440;
+                if (v < 0) v += 1440;
+                int16_t *f = player_facing();
+                int dv = f ? abs(v - *f) : 9999;
+                if (dv <= 8 || dv >= 1432) g_seen_player = 1;
+                g_player_angle = a;
             }
         }
     }
@@ -730,8 +750,8 @@ static void gbh_BeginScene(void)
 
 static void gbh_EndScene(void)
 {
-    if (g_near_d < 1e9f) g_player_angle = g_near_angle, g_player_size = g_near_size;
-    g_near_d = 1e9f;
+    g_on_foot = g_seen_player;
+    g_seen_player = 0;
     world3d_end_scene();
     RETURN_STDCALL(0, 0);
 }
