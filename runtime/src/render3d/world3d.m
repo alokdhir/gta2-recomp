@@ -16,6 +16,7 @@
 #include "render3d/world3d.h"
 #include "render3d/world_data.h"
 #include "render/lights.h"
+#include "render3d/upscale.h"
 #include "video/presenter.h"
 #include "win32/imports.h"
 #include "win32/win32.h"
@@ -505,36 +506,59 @@ static int setup(void)
     dd.depthWriteEnabled = YES;
     g_depth_on = [dev newDepthStencilStateWithDescriptor:dd];
     MTLSamplerDescriptor *sd = [MTLSamplerDescriptor new];
-    sd.minFilter = sd.magFilter = MTLSamplerMinMagFilterNearest;
+    sd.magFilter = MTLSamplerMinMagFilterLinear;      /* upscaled edges + bilinear: smooth, not grainy */
+    sd.minFilter = MTLSamplerMinMagFilterLinear;      /* trilinear when small */
+    sd.mipFilter = MTLSamplerMipFilterLinear;
     sd.sAddressMode = sd.tAddressMode = MTLSamplerAddressModeClampToEdge;
     g_samp = [dev newSamplerStateWithDescriptor:sd];
     return 1;
 }
 
-/* (Re)build the tile texture array when the level's style changes. */
+/* (Re)build the tile texture array when the level's style changes: tiles
+ * upscaled (Scale2x, GTA2_UPSCALE) and mipmapped so distant surfaces don't
+ * shimmer. Replacement textures would slot in here, ahead of the upscaler. */
+static int g_tiles_scale;
+
 static int ensure_tiles(void)
 {
     const char *path = world_style_path();
     if (!path) return 0;
-    if (g_tiles && !strcmp(path, g_tiles_for)) return 1;
+    int f = upscale_factor();
+    if (g_tiles && !strcmp(path, g_tiles_for) && f == g_tiles_scale) return 1;
     WorldStyle st;
     if (!world_style_load(path, &st)) return 0;
+    int px = TILE_PX * f;
     MTLTextureDescriptor *td = [MTLTextureDescriptor new];
     td.textureType = MTLTextureType2DArray;
     td.pixelFormat = MTLPixelFormatBGRA8Unorm;
-    td.width = td.height = TILE_PX;
+    td.width = td.height = (NSUInteger)px;
     td.arrayLength = (NSUInteger)st.ntiles;
+    td.mipmapLevelCount = (NSUInteger)floor(log2(px)) + 1;
     td.usage = MTLTextureUsageShaderRead;
     td.storageMode = MTLStorageModeShared;
     g_tiles = [presenter_device() newTextureWithDescriptor:td];
-    for (int t = 0; t < st.ntiles; t++)
-        [g_tiles replaceRegion:MTLRegionMake2D(0, 0, TILE_PX, TILE_PX)
+    for (int t = 0; t < st.ntiles; t++) {
+        const uint32_t *src = st.rgba + (size_t)t * TILE_PX * TILE_PX;
+        uint32_t *up = f > 1 ? upscale_pixels(src, TILE_PX, TILE_PX, f) : NULL;
+        [g_tiles replaceRegion:MTLRegionMake2D(0, 0, (NSUInteger)px, (NSUInteger)px)
                    mipmapLevel:0
                          slice:(NSUInteger)t
-                     withBytes:st.rgba + (size_t)t * TILE_PX * TILE_PX
-                   bytesPerRow:TILE_PX * 4
-                 bytesPerImage:TILE_PX * TILE_PX * 4];
+                     withBytes:up ? up : src
+                   bytesPerRow:(NSUInteger)px * 4
+                 bytesPerImage:(NSUInteger)px * px * 4];
+        free(up);
+    }
+    static id<MTLCommandQueue> q;
+    if (!q) q = [presenter_device() newCommandQueue];
+    id<MTLCommandBuffer> cb = [q commandBuffer];
+    id<MTLBlitCommandEncoder> bl = [cb blitCommandEncoder];
+    [bl generateMipmapsForTexture:g_tiles];
+    [bl endEncoding];
+    [cb commit];
+    [cb waitUntilCompleted];
     snprintf(g_tiles_for, sizeof g_tiles_for, "%s", path);
+    g_tiles_scale = f;
+    rt_log("world3d: %d tiles at %dx%d (upscale x%d)", st.ntiles, px, px, f);
     world_style_free(&st);
     return 1;
 }
