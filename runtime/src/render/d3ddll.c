@@ -367,15 +367,15 @@ static int quad_3d(uint32_t flags, uint32_t rec, uint32_t verts, uint8_t shade)
     for (uint32_t i = 0; i < 4; i++) {
         float f[8], w[3];
         memcpy(f, GPTR(verts + 32u * i), 32);
-        if (!world3d_unproject_zf(f[0], f[1], f[2], w)) return 0;
-        /* placed from the previous frame's camera fit, so give them clearance:
-         * a hair under the road and the depth test hides them (popping) */
-        w[2] += 0.03f;
+        if (f[2] <= 0.0f) return 0;
         uint32_t col = (flags & F_VERTEX_COLOUR) ? MEM32(verts + 32u * i + 16u) : shade_colour(shade);
-        if ((flags & 0x8000u) && g_ambient != 255.0f) col = light_vertex(col, shade, w);
-        q[i] = (WSpriteVert){ w[0], w[1], w[2], f[6] / tw, f[7] / th, col };
+        /* lighting needs a world position: last frame's camera is close enough for that */
+        if ((flags & 0x8000u) && g_ambient != 255.0f && world3d_unproject_zf(f[0], f[1], f[2], w))
+            col = light_vertex(col, shade, w);
+        q[i] = (WSpriteVert){ f[0], f[1], f[2], f[6] / tw, f[7] / th, col };
     }
-    world3d_sprite(q, tex, (int)blend_for(flags));
+    /* placed into the world at the end of the scene, with this frame's camera */
+    world3d_sprite_screen(q, tex, (int)blend_for(flags));
     return 1;
 }
 
@@ -710,7 +710,11 @@ static void gbh_BeginScene(void)
     RETURN_STDCALL(0, 0);
 }
 
-static void gbh_EndScene(void) { RETURN_STDCALL(0, 0); }
+static void gbh_EndScene(void)
+{
+    world3d_end_scene();
+    RETURN_STDCALL(0, 0);
+}
 
 /* gbh_SetWindow(left, top, right, bottom) as floats */
 static void gbh_SetWindow(void)

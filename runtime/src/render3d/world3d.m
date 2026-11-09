@@ -120,11 +120,8 @@ int world3d_unproject(float sx, float sy, float z, float *wx, float *wy)
     return 1;
 }
 
-void world3d_begin_frame(float w, float h)
+static void fit_solve(void)
 {
-    sprites_reset();
-    g_screen[0] = w;
-    g_screen[1] = h;
     double x[3], y[3];
     if (g_acc.n >= 8 && solve3(g_acc.a, g_acc.bx, x) && solve3(g_ay, g_by, y) && x[1] > 1 && y[1] > 1) {
         g_cam.cx = (float)x[0];
@@ -142,6 +139,24 @@ void world3d_begin_frame(float w, float h)
     memset(&g_acc, 0, sizeof g_acc);
     memset(g_ay, 0, sizeof g_ay);
     memset(g_by, 0, sizeof g_by);
+}
+
+static void sprites_place_screen(void);
+
+void world3d_begin_frame(float w, float h)
+{
+    sprites_reset();
+    g_screen[0] = w;
+    g_screen[1] = h;
+    fit_solve(); /* normally already done by world3d_end_scene */
+}
+
+/* End of the game's scene: solve this frame's camera now, so the world, the
+ * sprites and the screen-placed quads (shadows) all use the same camera. */
+void world3d_end_scene(void)
+{
+    fit_solve();
+    sprites_place_screen();
 }
 
 /* ---- mesh ------------------------------------------------------------------------- */
@@ -510,23 +525,30 @@ static SBatch *g_sb;
 static int g_nsb, g_capsb;
 static int g_sprite_order;
 
+/* For quads given in screen space (x, y = pixels, z = the game's 1/depth):
+ * their lift, placed into the world once the frame's camera is solved; -1
+ * for ordinary world-space vertices. */
+static float *g_svlift;
+
 static void sprites_reset(void)
 {
     g_nsv = g_nsb = 0;
     g_sprite_order = 0;
 }
 
-void world3d_sprite(const WSpriteVert q[4], int tex, int blend)
+static void sprite_add(const WSpriteVert q[4], int tex, int blend, int screen)
 {
     float lift = 0.004f + 0.0006f * (float)(g_sprite_order++ % 2000);
     static const int idx[6] = { 0, 1, 2, 0, 2, 3 };
     if (g_nsv + 6 > g_capsv) {
         g_capsv = (g_nsv + 6) * 2 + 1024;
         g_sv = realloc(g_sv, sizeof *g_sv * (size_t)g_capsv);
+        g_svlift = realloc(g_svlift, sizeof *g_svlift * (size_t)g_capsv);
     }
     for (int i = 0; i < 6; i++) {
         const WSpriteVert *p = &q[idx[i]];
-        g_sv[g_nsv + i] = (SVert){ p->x, p->y, p->z + lift, p->u, p->v, p->argb };
+        g_sv[g_nsv + i] = (SVert){ p->x, p->y, screen ? p->z : p->z + lift, p->u, p->v, p->argb };
+        g_svlift[g_nsv + i] = screen ? lift : -1.0f;
     }
     SBatch *last = g_nsb ? &g_sb[g_nsb - 1] : NULL;
     if (last && last->tex == tex && last->blend == blend && last->first + last->count == g_nsv) {
@@ -539,6 +561,24 @@ void world3d_sprite(const WSpriteVert q[4], int tex, int blend)
         g_sb[g_nsb++] = (SBatch){ g_nsv, 6, tex, blend };
     }
     g_nsv += 6;
+}
+
+void world3d_sprite(const WSpriteVert q[4], int tex, int blend) { sprite_add(q, tex, blend, 0); }
+void world3d_sprite_screen(const WSpriteVert q[4], int tex, int blend) { sprite_add(q, tex, blend, 1); }
+
+static void sprites_place_screen(void)
+{
+    for (int i = 0; i < g_nsv; i++) {
+        if (g_svlift[i] < 0) continue;
+        float w[3];
+        if (!world3d_unproject_zf(g_sv[i].x, g_sv[i].y, g_sv[i].z, w)) {
+            w[0] = w[1] = w[2] = -1000.0f; /* no camera yet: off the map */
+        }
+        g_sv[i].x = w[0];
+        g_sv[i].y = w[1];
+        g_sv[i].z = w[2] + g_svlift[i];
+        g_svlift[i] = -1.0f;
+    }
 }
 
 /* ---- Metal ---------------------------------------------------------------------------- */

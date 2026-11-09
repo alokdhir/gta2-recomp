@@ -21,6 +21,11 @@ typedef struct {
 } WSpriteVert;
 /* blend: 0 alpha (colour-keyed), 1 additive, 2 opaque (render.h RBlend) */
 void world3d_sprite(const WSpriteVert q[4], int tex, int blend);
+/* Same, with x, y in screen pixels and z the game's 1/depth: placed into the
+ * world at the end of the scene with that frame's camera (shadows, effects). */
+void world3d_sprite_screen(const WSpriteVert q[4], int tex, int blend);
+/* The game finished drawing the scene (gbh_EndScene). */
+void world3d_end_scene(void);
 
 /* Screen pixel -> world x,y on the plane at height z, with the fitted camera.
  * Returns 0 before the first fit. */
