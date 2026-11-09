@@ -242,7 +242,25 @@ static void script_run(void)
     }
 }
 
+/* The game hides the cursor with ShowCursor(FALSE). Hiding it app-wide
+ * (NSCursor hide) also hides it over dialogs and outside the window, so
+ * instead a blank cursor is shown only over the game view. */
+static int g_cursor_hidden;
+static NSCursor *blank_cursor(void)
+{
+    static NSCursor *c;
+    if (!c) {
+        NSImage *img = [[NSImage alloc] initWithSize:NSMakeSize(1, 1)];
+        c = [[NSCursor alloc] initWithImage:img hotSpot:NSZeroPoint];
+    }
+    return c;
+}
+
 @implementation GTA2View
+- (void)resetCursorRects
+{
+    if (g_cursor_hidden) [self addCursorRect:self.bounds cursor:blank_cursor()];
+}
 - (BOOL)wantsUpdateLayer { return YES; }
 - (CALayer *)makeBackingLayer
 {
@@ -366,7 +384,9 @@ void user32_set_client_size(uint32_t hwnd, int width, int height)
     if (!(win.styleMask & NSWindowStyleMaskFullScreen)) {
         /* fit on screen, keeping the aspect ratio */
         NSRect vis = win.screen ? win.screen.visibleFrame : NSScreen.mainScreen.visibleFrame;
-        double k = fmin(1.0, fmin((vis.size.width - 40) / width, (vis.size.height - 60) / height));
+        /* small resolutions open at 2x (the 640x480 menus are tiny otherwise) */
+        double want = width < 1280 ? 2.0 : 1.0;
+        double k = fmin(want, fmin((vis.size.width - 40) / width, (vis.size.height - 60) / height));
         [win setContentSize:NSMakeSize(width * k, height * k)];
         [win center];
         if (reg_get_dword("screen", "mac_fullscreen", 0) && width > 640) [win toggleFullScreen:nil];
@@ -442,6 +462,11 @@ static void CreateWindowExA(void)
         del.hwnd = win->hwnd;
         nw.delegate = del;
         [nw makeFirstResponder:view];
+        {
+            NSRect vis = nw.screen ? nw.screen.visibleFrame : NSScreen.mainScreen.visibleFrame;
+            double k = fmin(w < 1280 ? 2.0 : 1.0, fmin((vis.size.width - 40) / w, (vis.size.height - 60) / h));
+            [nw setContentSize:NSMakeSize(w * k, h * k)];
+        }
         [nw center];
         if (getenv("GTA2_HEADLESS")) { /* still renders (for captures), but invisible and click-through */
             nw.alphaValue = 0;
@@ -707,7 +732,16 @@ static void ShowCursor(void)
 {
     static int count = 0;
     count += ARG(0) ? 1 : -1;
-    if (ARG(0)) [NSCursor unhide]; else [NSCursor hide];
+    int hidden = count < 0;
+    if (hidden != g_cursor_hidden) {
+        g_cursor_hidden = hidden;
+        for (int i = 0; i < MAX_WINDOWS; i++) {
+            if (!g_windows[i].hwnd || !g_windows[i].window) continue;
+            NSWindow *nw = (__bridge NSWindow *)g_windows[i].window;
+            [nw invalidateCursorRectsForView:nw.contentView];
+        }
+        if (!hidden) [NSCursor.arrowCursor set];
+    }
     RETURN_STDCALL((uint32_t)count, 1);
 }
 
