@@ -12,6 +12,7 @@
 
 #include "guest_call.h"
 #include "guest_memory.h"
+#include "input/dinput.h"
 #include "platform/keymap.h"
 #include "win32/imports.h"
 #include "win32/user32_api.h"
@@ -123,6 +124,7 @@ static void key_event(NSEvent *e, int down)
 {
     uint8_t vk, dik;
     if (!keymap_from_mac(e.keyCode, &vk, &dik)) return;
+    if (!(down && e.isARepeat)) dinput_key_event(dik, down, (uint32_t)now_ms());
     g_key_down[dik] = down ? 0x80 : 0;
     uint32_t hwnd = ((GTA2View *)e.window.contentView).hwnd;
     uint32_t repeat = (down && e.isARepeat) ? (1u << 30) : 0;

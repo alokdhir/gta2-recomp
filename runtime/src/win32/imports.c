@@ -19,7 +19,7 @@ static RECOMP_TLS unsigned g_current; /* thunk index being dispatched to a stub 
 
 static const NativeExport *const g_modules[] = {
     g_kernel32_exports, g_kernel32_file_exports, g_module_exports, g_user32_exports,
-    g_advapi32_exports, g_misc_exports,
+    g_advapi32_exports, g_dinput_exports, g_misc_exports,
 };
 
 static NativeImpl find_native(const char *ident)

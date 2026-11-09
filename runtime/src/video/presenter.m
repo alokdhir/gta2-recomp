@@ -1,0 +1,136 @@
+/* Metal presenter. See presenter.h. */
+#import <AppKit/AppKit.h>
+#import <Metal/Metal.h>
+#import <QuartzCore/CAMetalLayer.h>
+
+#include "video/presenter.h"
+#include "win32/imports.h"
+
+static id<MTLDevice> g_dev;
+static id<MTLCommandQueue> g_queue;
+static id<MTLRenderPipelineState> g_blit;
+static id<MTLSamplerState> g_nearest;
+static id<MTLTexture> g_fbtex;
+static CAMetalLayer *g_layer;
+static int g_w, g_h;
+static float g_gamma[4] = { 1, 1, 1, 0 }; /* float3 in the shader: 16 bytes */
+
+static NSString *const kShaders =
+    @"#include <metal_stdlib>\n"
+     "using namespace metal;\n"
+     "struct VOut { float4 pos [[position]]; float2 uv; };\n"
+     "vertex VOut blit_vs(uint vid [[vertex_id]], constant float4 &rect [[buffer(0)]]) {\n"
+     "    float2 c = float2(vid & 1, vid >> 1);\n"
+     "    VOut o;\n"
+     "    o.pos = float4(mix(rect.xy, rect.zw, c), 0, 1);\n"
+     "    o.uv = float2(c.x, 1 - c.y);\n"
+     "    return o;\n"
+     "}\n"
+     "fragment float4 blit_fs(VOut in [[stage_in]], texture2d<float> t [[texture(0)]],\n"
+     "                        sampler s [[sampler(0)]], constant float3 &gamma [[buffer(0)]]) {\n"
+     "    float3 c = t.sample(s, in.uv).rgb;\n"
+     "    return float4(pow(c, 1.0 / gamma), 1);\n"
+     "}\n";
+
+int presenter_init(void *metal_layer, int width, int height)
+{
+    if (!g_dev) {
+        g_dev = MTLCreateSystemDefaultDevice();
+        if (!g_dev) rt_fatal("no Metal device");
+        g_queue = [g_dev newCommandQueue];
+        NSError *err = nil;
+        id<MTLLibrary> lib = [g_dev newLibraryWithSource:kShaders options:nil error:&err];
+        if (!lib) rt_fatal("Metal shader compile failed: %s", err.localizedDescription.UTF8String);
+        MTLRenderPipelineDescriptor *pd = [MTLRenderPipelineDescriptor new];
+        pd.vertexFunction = [lib newFunctionWithName:@"blit_vs"];
+        pd.fragmentFunction = [lib newFunctionWithName:@"blit_fs"];
+        pd.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+        pd.colorAttachments[0].blendingEnabled = NO;
+        g_blit = [g_dev newRenderPipelineStateWithDescriptor:pd error:&err];
+        if (!g_blit) rt_fatal("Metal pipeline failed: %s", err.localizedDescription.UTF8String);
+        MTLSamplerDescriptor *sd = [MTLSamplerDescriptor new];
+        sd.minFilter = sd.magFilter = MTLSamplerMinMagFilterNearest;
+        g_nearest = [g_dev newSamplerStateWithDescriptor:sd];
+    }
+    g_layer = (__bridge CAMetalLayer *)metal_layer;
+    g_layer.device = g_dev;
+    g_layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+    g_layer.framebufferOnly = YES;
+    g_layer.displaySyncEnabled = YES;
+
+    if (width != g_w || height != g_h || !g_fbtex) {
+        MTLTextureDescriptor *td = [MTLTextureDescriptor
+            texture2DDescriptorWithPixelFormat:MTLPixelFormatB5G6R5Unorm
+                                         width:(NSUInteger)width
+                                        height:(NSUInteger)height
+                                     mipmapped:NO];
+        td.usage = MTLTextureUsageShaderRead;
+        td.storageMode = MTLStorageModeShared;
+        g_fbtex = [g_dev newTextureWithDescriptor:td];
+        g_w = width;
+        g_h = height;
+    }
+    rt_log("presenter: %dx%d on %s", width, height, g_dev.name.UTF8String);
+    return 1;
+}
+
+int presenter_width(void) { return g_w; }
+int presenter_height(void) { return g_h; }
+
+void presenter_set_gamma(float r, float g, float b)
+{
+    g_gamma[0] = r > 0 ? r : 1;
+    g_gamma[1] = g > 0 ? g : 1;
+    g_gamma[2] = b > 0 ? b : 1;
+}
+
+void presenter_frame(const void *fb, uint32_t pitch, PresenterSceneFn scene, void *ctx)
+{
+    if (!g_layer) return;
+    @autoreleasepool {
+        CGFloat scale = g_layer.contentsScale;
+        CGSize sz = g_layer.bounds.size;
+        CGSize px = CGSizeMake(MAX(1, sz.width * scale), MAX(1, sz.height * scale));
+        if (!CGSizeEqualToSize(g_layer.drawableSize, px)) g_layer.drawableSize = px;
+
+        if (fb)
+            [g_fbtex replaceRegion:MTLRegionMake2D(0, 0, (NSUInteger)g_w, (NSUInteger)g_h)
+                       mipmapLevel:0
+                         withBytes:fb
+                       bytesPerRow:pitch];
+
+        id<CAMetalDrawable> drawable = [g_layer nextDrawable];
+        if (!drawable) return;
+        MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+        rp.colorAttachments[0].texture = drawable.texture;
+        rp.colorAttachments[0].loadAction = MTLLoadActionClear;
+        rp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
+        rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+
+        id<MTLCommandBuffer> cb = [g_queue commandBuffer];
+        id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
+
+        /* Aspect-fit the game's resolution into the drawable (letterbox) */
+        double ga = (double)g_w / g_h, da = px.width / px.height;
+        float sx = da > ga ? (float)(ga / da) : 1.0f, sy = da > ga ? 1.0f : (float)(da / ga);
+        float rect[4] = { -sx, -sy, sx, sy };
+
+        if (scene) scene(enc, ctx);
+        if (fb) {
+            [enc setRenderPipelineState:g_blit];
+            [enc setVertexBytes:rect length:sizeof rect atIndex:0];
+            [enc setFragmentTexture:g_fbtex atIndex:0];
+            [enc setFragmentSamplerState:g_nearest atIndex:0];
+            [enc setFragmentBytes:g_gamma length:sizeof(float) * 4 atIndex:0];
+            [enc drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+        }
+        [enc endEncoding];
+        [cb presentDrawable:drawable];
+        [cb commit];
+    }
+}
+
+void presenter_shutdown(void)
+{
+    g_layer = nil;
+}
