@@ -186,9 +186,11 @@ static void push_lid(float X, float Y, float z, const float (*pts)[2], int n, co
         v[i][0] = X + px;
         v[i][1] = Y + py;
         v[i][2] = z + hz;
-        float u = px, w = py;
-        if (FACE_FLIP(face)) u = 1 - u;
-        for (unsigned r = 0; r < FACE_ROT(face); r++) { float t = u; u = 1 - w; w = t; }
+        /* The original's rule (derived from its own UVs): the texture is
+         * turned clockwise by the face's quarter turns, then mirrored
+         * east-west if the flip bit is set. Invert that for this point. */
+        float u = FACE_FLIP(face) ? 1 - px : px, w = py;
+        for (unsigned r = 0; r < FACE_ROT(face); r++) { float t = u; u = w; w = 1 - t; }
         uv[i][0] = u;
         uv[i][1] = w;
     }
@@ -224,12 +226,32 @@ static void build_block(int x, int y, int z, const GBlock *b)
     float h[4] = { 1, 1, 1, 1 };
     static const float cell[4][2] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
 
-    if (st >= 45 && st <= 52) {
-        /* Diagonal: triangular footprint, slanted wall along the diagonal.
+    if (st >= 49 && st <= 52) {
+        /* Diagonal slope (a corner of a ramp): the surface rises from the
+         * diagonal edge to the opposite corner; no vertical diagonal wall.
+         * 49 up-left (high SE), 50 up-right (high SW), 51 down-left (high NE),
+         * 52 down-right (high NW). Corner heights NW, NE, SE, SW. */
+        float hs[4] = { 0, 0, 0, 0 };
+        float tri[3][2];
+        switch (st) {
+        case 49: hs[2] = 1; tri[0][0] = 1; tri[0][1] = 0; tri[1][0] = 1; tri[1][1] = 1; tri[2][0] = 0; tri[2][1] = 1; break;
+        case 50: hs[3] = 1; tri[0][0] = 0; tri[0][1] = 0; tri[1][0] = 1; tri[1][1] = 1; tri[2][0] = 0; tri[2][1] = 1; break;
+        case 51: hs[1] = 1; tri[0][0] = 0; tri[0][1] = 0; tri[1][0] = 1; tri[1][1] = 0; tri[2][0] = 1; tri[2][1] = 1; break;
+        default: hs[0] = 1; tri[0][0] = 0; tri[0][1] = 0; tri[1][0] = 1; tri[1][1] = 0; tri[2][0] = 0; tri[2][1] = 1; break;
+        }
+        push_lid(X, Y, Z, (const float(*)[2])tri, 3, hs, b->lid);
+        push_wall(X, Y1, X, Y, Z, hs[3], hs[0], b->left, SH_LEFT);
+        push_wall(X1, Y, X1, Y1, Z, hs[1], hs[2], b->right, SH_RIGHT);
+        push_wall(X, Y, X1, Y, Z, hs[0], hs[1], b->top, SH_TOP);
+        push_wall(X1, Y1, X, Y1, Z, hs[2], hs[3], b->bottom, SH_BOTTOM);
+        return;
+    }
+
+    if (st >= 45 && st <= 48) {
+        /* Diagonal wall: triangular footprint, slanted wall along the diagonal.
          * 45 faces up-left (solid SE), 46 up-right (solid SW),
-         * 47 down-left (solid NE), 48 down-right (solid NW); 49-52 the same
-         * footprints (their sloped lids are drawn flat for now). */
-        int kind = (int)(st >= 49 ? st - 49 : st - 45);
+         * 47 down-left (solid NE), 48 down-right (solid NW). */
+        int kind = (int)(st - 45);
         float tri[3][2];
         switch (kind) {
         case 0: /* solid SE: NE, SE, SW */
