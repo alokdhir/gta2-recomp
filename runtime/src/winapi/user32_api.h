@@ -12,3 +12,8 @@ void user32_inject_key(unsigned mac_keycode, int down);
 
 /* Window title shows which renderer is active. */
 void user32_update_title(void);
+
+/* Developer actions (menu "Debug", Cmd-1/2/3, controller View + LB/RB/Y). */
+void user32_action_toggle_renderer(void); /* original <-> 3D */
+void user32_action_snapshot(void);        /* A/B screenshots + map log of the next frame */
+void user32_action_replay(void);          /* save the last few seconds */

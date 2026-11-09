@@ -1,6 +1,8 @@
 /* Metal presenter. See presenter.h. */
 #import <AppKit/AppKit.h>
 #import <Metal/Metal.h>
+#include <sys/stat.h>
+#include <time.h>
 #import <QuartzCore/CAMetalLayer.h>
 #import <ImageIO/ImageIO.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
@@ -33,11 +35,8 @@ static const char *g_capture_path;
 static unsigned g_capture_frame;
 
 /* GTA2_CAPTURE=out.png [GTA2_CAPTURE_FRAME=n]: save frame n (default 120) as a PNG. */
-static void write_png(id<MTLTexture> t, const char *path)
+static void write_png_bytes(void *px, size_t w, size_t h, const char *path)
 {
-    size_t w = t.width, h = t.height;
-    void *px = malloc(w * h * 4);
-    [t getBytes:px bytesPerRow:w * 4 fromRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0];
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     CGContextRef ctx = CGBitmapContextCreate(px, w, h, 8, w * 4, cs,
                                              kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little);
@@ -47,6 +46,87 @@ static void write_png(id<MTLTexture> t, const char *path)
     CGImageDestinationAddImage(dst, img, NULL);
     CGImageDestinationFinalize(dst);
     CFRelease(dst); CFRelease(url); CGImageRelease(img); CGContextRelease(ctx); CGColorSpaceRelease(cs);
+}
+
+/* ---- instant replay: the last few seconds, half size, every other frame ---- */
+#define REPLAY_FRAMES 90 /* 3 s at 30 fps */
+static id<MTLTexture> g_replay[REPLAY_FRAMES];
+static uint64_t g_replay_count; /* frames recorded so far */
+static id<MTLRenderPipelineState> g_copy;
+static int g_replay_save;
+
+void presenter_save_replay(void) { g_replay_save = 1; }
+
+static void replay_record(id<MTLCommandBuffer> cb, id<MTLTexture> src)
+{
+    if (!g_copy || getenv("GTA2_HEADLESS")) return;
+    static unsigned tick;
+    if (tick++ & 1) return;
+    NSUInteger w = src.width / 2, h = src.height / 2;
+    id<MTLTexture> __strong *slot = &g_replay[g_replay_count % REPLAY_FRAMES];
+    if (!*slot || (*slot).width != w || (*slot).height != h) {
+        if (*slot) g_replay_count = 0; /* size changed: start over */
+        slot = &g_replay[g_replay_count % REPLAY_FRAMES];
+        MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                                                                      width:w height:h mipmapped:NO];
+        td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+        td.storageMode = MTLStorageModeShared;
+        *slot = [g_dev newTextureWithDescriptor:td];
+    }
+    MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+    rp.colorAttachments[0].texture = *slot;
+    rp.colorAttachments[0].loadAction = MTLLoadActionDontCare;
+    rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+    id<MTLRenderCommandEncoder> e = [cb renderCommandEncoderWithDescriptor:rp];
+    [e setRenderPipelineState:g_copy];
+    [e setFragmentTexture:src atIndex:0];
+    [e setFragmentSamplerState:g_linear atIndex:0];
+    [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+    [e endEncoding];
+    g_replay_count++;
+}
+
+/* Copy the ring out (oldest first) and write PNGs on a background queue. */
+static void replay_write(void)
+{
+    uint64_t n = g_replay_count < REPLAY_FRAMES ? g_replay_count : REPLAY_FRAMES;
+    if (!n) return;
+    const char *base = getenv("GTA2_AB_DIR") ?: "captures";
+    mkdir(base, 0755);
+    char dir[1100];
+    time_t now = time(NULL);
+    struct tm tm;
+    localtime_r(&now, &tm);
+    snprintf(dir, sizeof dir, "%s/replay_%04d%02d%02d_%02d%02d%02d", base, tm.tm_year + 1900, tm.tm_mon + 1,
+             tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+    mkdir(dir, 0755);
+    NSMutableArray *frames = [NSMutableArray array];
+    size_t w = 0, h = 0;
+    for (uint64_t i = 0; i < n; i++) {
+        id<MTLTexture> t = g_replay[(g_replay_count - n + i) % REPLAY_FRAMES];
+        w = t.width, h = t.height;
+        NSMutableData *d = [NSMutableData dataWithLength:w * h * 4];
+        [t getBytes:d.mutableBytes bytesPerRow:w * 4 fromRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0];
+        [frames addObject:d];
+    }
+    NSString *ns = [NSString stringWithUTF8String:dir];
+    rt_log("presenter: saving replay (%llu frames) to %s", (unsigned long long)n, dir);
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        for (NSUInteger i = 0; i < frames.count; i++) {
+            char path[1200];
+            snprintf(path, sizeof path, "%s/frame_%03lu.png", ns.UTF8String, (unsigned long)i);
+            write_png_bytes(((NSMutableData *)frames[i]).mutableBytes, w, h, path);
+        }
+        rt_log("presenter: replay saved to %s", ns.UTF8String);
+    });
+}
+
+static void write_png(id<MTLTexture> t, const char *path)
+{
+    size_t w = t.width, h = t.height;
+    void *px = malloc(w * h * 4);
+    [t getBytes:px bytesPerRow:w * 4 fromRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0];
+    write_png_bytes(px, w, h, path);
     free(px);
     rt_log("presenter: captured frame %u to %s", g_frame_no, path);
 }
@@ -94,6 +174,9 @@ static NSString *const kShaders =
      "    }\n"
      "    return float4(c, 1);\n"
      "}\n"
+     "fragment float4 copy_fs(FOut in [[stage_in]], texture2d<float> t [[texture(0)]], sampler s [[sampler(0)]]) {\n"
+     "    return float4(t.sample(s, in.uv).rgb, 1);\n"
+     "}\n"
      "fragment float4 compose_fs(FOut in [[stage_in]], texture2d<float> scene [[texture(0)]],\n"
      "                           texture2d<float> bloom [[texture(1)]], sampler s [[sampler(0)]]) {\n"
      "    float3 c = scene.sample(s, in.uv).rgb + bloom.sample(s, in.uv).rgb * 0.85;\n"
@@ -134,13 +217,19 @@ int presenter_init(void *metal_layer, int width, int height)
             *outs[i] = [g_dev newRenderPipelineStateWithDescriptor:bd error:&err];
             if (!*outs[i]) rt_log("presenter: bloom pipeline failed: %s", err.localizedDescription.UTF8String);
         }
+        MTLRenderPipelineDescriptor *cd = [MTLRenderPipelineDescriptor new];
+        cd.vertexFunction = [lib newFunctionWithName:@"full_vs"];
+        cd.fragmentFunction = [lib newFunctionWithName:@"copy_fs"];
+        cd.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+        g_copy = [g_dev newRenderPipelineStateWithDescriptor:cd error:&err];
     }
     g_layer = (__bridge CAMetalLayer *)metal_layer;
     g_layer.device = g_dev;
     g_layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
     g_capture_path = getenv("GTA2_CAPTURE");
     g_capture_frame = getenv("GTA2_CAPTURE_FRAME") ? (unsigned)atoi(getenv("GTA2_CAPTURE_FRAME")) : 120;
-    g_layer.framebufferOnly = g_capture_path == NULL && getenv("GTA2_AB") == NULL;
+    /* readable drawables: captures, and the instant replay (not in headless test runs) */
+    g_layer.framebufferOnly = g_capture_path == NULL && getenv("GTA2_AB") == NULL && getenv("GTA2_HEADLESS");
     g_layer.displaySyncEnabled = YES;
 
     if (width != g_w || height != g_h || !g_fbtex) {
@@ -308,8 +397,14 @@ void presenter_frame(const void *fb, uint32_t pitch, PresenterSceneFn scene, voi
         if (ab > 0 && (int)g_frame_no == ab) { ab_path = "ab_original.png"; world3d_set(1); }
         if (ab > 0 && (int)g_frame_no == ab + 2) ab_path = "ab_3d.png";
         int capture = (g_capture_path && ++g_frame_no == g_capture_frame) || ab_path;
+        if (!g_layer.framebufferOnly) replay_record(cb, drawable.texture);
         [cb presentDrawable:drawable];
         [cb commit];
+        if (g_replay_save) {
+            g_replay_save = 0;
+            [cb waitUntilCompleted];
+            replay_write();
+        }
         if (capture) {
             [cb waitUntilCompleted];
             char path[1100];

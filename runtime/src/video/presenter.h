@@ -27,6 +27,8 @@ void presenter_fit_rect(float out[4]);
  * straight onto the final image). */
 enum { PHASE_ALL = 0, PHASE_WORLD = 1, PHASE_OVERLAY = 2 };
 int presenter_phase(void);
+/* Save the last few seconds (instant replay) as a PNG sequence. */
+void presenter_save_replay(void);
 #ifdef __OBJC__
 /* Called each frame with the frame's command buffer before the main pass
  * (e.g. to render a shadow map that the main pass then samples). */

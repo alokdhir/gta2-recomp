@@ -33,6 +33,21 @@ void gamepad_poll(void)
         rt_log("gamepad: %s", pad.vendorName.UTF8String ?: "controller");
         g_announced = 1;
     }
+    /* Developer combos: hold View (Back/Select/Share) and press LB = switch
+     * renderer, RB = snapshot, Y = instant replay. While View is held those
+     * buttons don't reach the game. */
+    static int combo_prev[3];
+    int view = g.buttonOptions.pressed;
+    int combo[3] = { view && g.leftShoulder.pressed, view && g.rightShoulder.pressed, view && g.buttonY.pressed };
+    for (int i = 0; i < 3; i++) {
+        if (combo[i] && !combo_prev[i]) {
+            if (i == 0) user32_action_toggle_renderer();
+            if (i == 1) user32_action_snapshot();
+            if (i == 2) user32_action_replay();
+        }
+        combo_prev[i] = combo[i];
+    }
+
     const float t = 0.5f;
     int want[K_COUNT] = { 0 };
     want[K_UP] = g.leftThumbstick.yAxis.value > t || g.dpad.up.pressed || g.rightTrigger.value > 0.3f;
@@ -42,9 +57,9 @@ void gamepad_poll(void)
     want[K_JUMP] = g.buttonA.pressed;
     want[K_ENTER] = g.buttonB.pressed;
     want[K_ATTACK] = g.buttonX.pressed;
-    want[K_SPECIAL1] = g.buttonY.pressed;
-    want[K_PREV] = g.leftShoulder.pressed;
-    want[K_NEXT] = g.rightShoulder.pressed;
+    want[K_SPECIAL1] = g.buttonY.pressed && !view;
+    want[K_PREV] = g.leftShoulder.pressed && !view;
+    want[K_NEXT] = g.rightShoulder.pressed && !view;
     want[K_SPECIAL3] = g.leftThumbstickButton.pressed;
     want[K_SPECIAL2] = g.rightThumbstickButton.pressed;
     want[K_PAUSE] = g.buttonMenu.pressed;

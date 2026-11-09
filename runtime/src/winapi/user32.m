@@ -132,24 +132,33 @@ void user32_update_title(void)
     for (int i = 0; i < MAX_WINDOWS; i++) {
         if (!g_windows[i].hwnd) continue;
         ((__bridge NSWindow *)g_windows[i].window).title =
-            world3d_enabled() ? @"GTA2 – 3D renderer (F9: original)" : @"GTA2 – original renderer (F9: 3D)";
+            world3d_enabled() ? @"GTA2 – 3D renderer (⌘1: original)" : @"GTA2 – original renderer (⌘1: 3D)";
     }
 }
+
+void user32_action_toggle_renderer(void)
+{
+    world3d_toggle();
+    user32_update_title();
+}
+
+void user32_action_snapshot(void)
+{
+    world3d_set(0); /* the probe reads the original renderer's stream */
+    d3ddll_probe_next_frame();
+    presenter_request_ab();
+    user32_update_title();
+}
+
+void user32_action_replay(void) { presenter_save_replay(); }
 
 static void key_transition(uint32_t hwnd, unsigned mac_keycode, int down, int repeat, NSString *chars)
 {
     uint8_t vk, dik;
     if (!keymap_from_mac(mac_keycode, &vk, &dik)) return;
-    if (vk == 0x79 /* F10: probe */ && down && !repeat) {
-        world3d_set(0);              /* the probe reads the original renderer's stream */
-        d3ddll_probe_next_frame();
-        presenter_request_ab();
-        user32_update_title();
-    }
-    if (vk == 0x78 /* F9 */ && down && !repeat) {
-        world3d_toggle();
-        user32_update_title();
-    }
+    /* F-keys still work (scripts use them); the menu's Cmd-1/2/3 are the easy way */
+    if (vk == 0x79 /* F10 */ && down && !repeat) user32_action_snapshot();
+    if (vk == 0x78 /* F9 */ && down && !repeat) user32_action_toggle_renderer();
     if (!repeat) dinput_key_event(dik, down, (uint32_t)now_ms());
     g_key_down[dik] = down ? 0x80 : 0;
     uint32_t lparam = 1u | (uint32_t)(dik & 0x7F) << 16 | (dik & 0x80 ? 1u << 24 : 0) |
@@ -256,6 +265,15 @@ static NSCursor *blank_cursor(void)
     return c;
 }
 
+@interface GTA2Actions : NSObject
+@end
+@implementation GTA2Actions
+- (void)toggleRenderer:(id)sender { user32_action_toggle_renderer(); }
+- (void)snapshot:(id)sender { user32_action_snapshot(); }
+- (void)replay:(id)sender { user32_action_replay(); }
+@end
+static GTA2Actions *g_actions;
+
 @implementation GTA2View
 - (void)resetCursorRects
 {
@@ -333,6 +351,22 @@ void user32_init(void)
                                      keyEquivalent:@"f"];
         fs.keyEquivalentModifierMask = NSEventModifierFlagCommand;
         appItem.submenu = appMenu;
+        /* Debug menu: Cmd-1/2/3 (no fn key needed, and the game never uses Cmd) */
+        g_actions = [GTA2Actions new];
+        NSMenuItem *dbgItem = [NSMenuItem new];
+        [bar addItem:dbgItem];
+        NSMenu *dbg = [[NSMenu alloc] initWithTitle:@"Debug"];
+        struct { NSString *title, *key; SEL sel; } items[] = {
+            { @"Switch Renderer (Original / 3D)", @"1", @selector(toggleRenderer:) },
+            { @"Snapshot (A/B Screenshots + Map Log)", @"2", @selector(snapshot:) },
+            { @"Save Instant Replay (Last 3 s)", @"3", @selector(replay:) },
+        };
+        for (size_t i = 0; i < 3; i++) {
+            NSMenuItem *it = [dbg addItemWithTitle:items[i].title action:items[i].sel keyEquivalent:items[i].key];
+            it.target = g_actions;
+            it.keyEquivalentModifierMask = NSEventModifierFlagCommand;
+        }
+        dbgItem.submenu = dbg;
         NSApp.mainMenu = bar;
         [NSApp finishLaunching];
         if (!getenv("GTA2_HEADLESS")) [NSApp activateIgnoringOtherApps:YES];
