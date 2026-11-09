@@ -326,6 +326,15 @@ void presenter_frame(const void *fb, uint32_t pitch, PresenterSceneFn scene, voi
         rp.depthAttachment.clearDepth = 1.0;
         rp.depthAttachment.storeAction = MTLStoreActionDontCare;
 
+        /* hitch log: frames that took much longer than usual (the game then runs
+         * fast for a moment to catch up), to match against replays */
+        {
+            static uint64_t last;
+            uint64_t now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+            if (last && now - last > 50000000ull)
+                rt_log("presenter: slow frame %.0f ms at frame %u", (double)(now - last) / 1e6, g_frame_no);
+            last = now;
+        }
         id<MTLCommandBuffer> cb = [g_queue commandBuffer];
         if (g_prepass) g_prepass(cb);
         id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
