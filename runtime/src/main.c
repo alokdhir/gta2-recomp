@@ -61,6 +61,7 @@ void app_exit_hook(void)
     uint32_t n = sizeof exe;
     if (_NSGetExecutablePath(exe, &n) != 0) return;
     rt_log("relaunching %s", exe);
+    setenv("GTA2_NO_MOVIE", "1", 1); /* the player has just seen the menu: no intro again */
     char *argv[] = { exe, NULL };
     execv(exe, argv);
 }

@@ -15,7 +15,7 @@
 
 int movie_play(const char *bik_path)
 {
-    if (getenv("GTA2_HEADLESS")) return 0;
+    if (getenv("GTA2_HEADLESS") || getenv("GTA2_NO_MOVIE")) return 0;
     /* "data\movie\intro.bik" -> data/movie/intro.mp4 (file lookups are case-insensitive
      * in kernel32_file, but AVFoundation needs the real name) */
     char path[1024];
