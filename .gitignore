@@ -1,0 +1,6 @@
+# Game data is copyrighted: never commit it
+/game_files/
+/build/
+/generated/
+.DS_Store
+/.venv/
