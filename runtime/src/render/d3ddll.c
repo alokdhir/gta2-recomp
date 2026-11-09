@@ -384,7 +384,7 @@ static int sprite_3d(uint32_t flags, uint32_t rec, uint32_t verts, uint8_t shade
                 if (v < 0) v += 1440;
                 int16_t *f = player_facing();
                 int dv = f ? abs(v - *f) : 9999;
-                if (dv <= 8 || dv >= 1432) g_seen_player = 1;
+                if (dv <= 60 || dv >= 1380) g_seen_player = 1; /* within 15 degrees */
                 g_player_angle = a;
             }
         }
@@ -755,7 +755,12 @@ static void gbh_BeginScene(void)
 
 static void gbh_EndScene(void)
 {
-    g_on_foot = g_seen_player;
+    /* hysteresis: seen this frame = on foot at once; "not on foot" only after
+     * ~0.5 s without the player's sprite (getting into a car takes longer),
+     * so a frame where the facing just changed can't flip the controls */
+    static int unseen = 1000;
+    unseen = g_seen_player ? 0 : unseen + 1;
+    g_on_foot = unseen < 30;
     g_seen_player = 0;
     world3d_end_scene();
     RETURN_STDCALL(0, 0);
