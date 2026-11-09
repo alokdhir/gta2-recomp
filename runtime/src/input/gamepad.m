@@ -76,6 +76,17 @@ void gamepad_poll(void)
     int want[K_COUNT] = { 0 };
     float sx = g.leftThumbstick.xAxis.value, sy = g.leftThumbstick.yAxis.value;
     int16_t *facing = stick_mode() && d3ddll_player_on_foot() ? player_facing() : NULL;
+    /* log stick-mode transitions, so replays can be matched to what it did */
+    {
+        static int prev_state = -1;
+        int state = !stick_mode() ? 0 : !d3ddll_player_on_foot() ? 1 : !facing ? 2 : sx * sx + sy * sy > 0.35f * 0.35f ? 4 : 3;
+        static const char *names[] = { "tank controls", "in car / not on foot", "on foot, no player found",
+                                       "on foot, stick at rest", "on foot, steering by stick" };
+        if (state != prev_state) {
+            rt_log("gamepad: %s (stick %.2f, %.2f)", names[state], sx, sy);
+            prev_state = state;
+        }
+    }
     if (facing && sx * sx + sy * sy > 0.35f * 0.35f) {
         /* bearing anticlockwise from north, in quarter degrees */
         float deg = atan2f(-sx, sy) * 57.29578f;

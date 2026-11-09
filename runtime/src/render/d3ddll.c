@@ -327,16 +327,21 @@ static int g_seen_player, g_on_foot;
 float d3ddll_player_angle(void) { return g_player_angle; }
 
 /* The player's facing, in GTA2's units: 0..1439 quarter degrees, 720 = north
- * (up the screen), increasing anticlockwise. Found by snapshotting memory
- * while turning: [0x5E5BC0] points into the player's ped, its sprite pointer
- * is at +0x190 and the sprite's rotation at +0x40. NULL if the chain looks
- * invalid. */
+ * (up the screen), increasing anticlockwise. Chain: [0x5EB4FC] is the game
+ * object, +0x38 the local player, player +0x2C4 its ped, ped +0x168 the
+ * ped's sprite, sprite +0x40 the rotation (found by snapshotting memory
+ * while turning). NULL whenever a link doesn't look valid. */
+static int heap_ptr(uint32_t p, uint32_t span) { return p >= GUEST_HEAP_LO && p + span <= guest_heap_top(); }
 int16_t *player_facing(void)
 {
-    uint32_t ped = MEM32(0x5E5BC0u);
-    if (ped < GUEST_HEAP_LO || ped + 0x200u > guest_heap_top()) return NULL;
-    uint32_t spr = MEM32(ped + 0x190u);
-    if (spr < GUEST_HEAP_LO || spr + 0x44u > guest_heap_top()) return NULL;
+    uint32_t game = MEM32(0x5EB4FCu);
+    if (!heap_ptr(game, 0x40)) return NULL;
+    uint32_t player = MEM32(game + 0x38u);
+    if (!heap_ptr(player, 0x2C8)) return NULL;
+    uint32_t ped = MEM32(player + 0x2C4u);
+    if (!heap_ptr(ped, 0x16C)) return NULL;
+    uint32_t spr = MEM32(ped + 0x168u);
+    if (!heap_ptr(spr, 0x44)) return NULL;
     int16_t *a = (int16_t *)XBOX_PTR(spr + 0x40u);
     return *a >= 0 && *a < 1440 ? a : NULL;
 }
