@@ -925,11 +925,22 @@ static int ensure_tiles(void)
     td.usage = MTLTextureUsageShaderRead;
     td.storageMode = MTLStorageModeShared;
     g_tiles = [presenter_device() newTextureWithDescriptor:td];
+    /* decode / upscale every tile in parallel (990 PNGs one by one stalled the
+     * level start for seconds), then upload in order */
+    uint32_t **ups = calloc((size_t)st.ntiles, sizeof *ups);
+    __block int packed = 0;
+    const char *pdir_p = pdir;
+    dispatch_apply((size_t)st.ntiles, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^(size_t t) {
+        const uint32_t *src = st.rgba + t * TILE_PX * TILE_PX;
+        uint32_t *u = pack ? pack_load(pdir_p, (int)t, px) : NULL;
+        if (u) __atomic_fetch_add(&packed, 1, __ATOMIC_RELAXED);
+        else if (f > 1) u = upscale_pixels(src, TILE_PX, TILE_PX, f);
+        ups[t] = u;
+    });
+    from_pack = packed;
     for (int t = 0; t < st.ntiles; t++) {
         const uint32_t *src = st.rgba + (size_t)t * TILE_PX * TILE_PX;
-        uint32_t *up = pack ? pack_load(pdir, t, px) : NULL;
-        if (up) from_pack++;
-        else if (f > 1) up = upscale_pixels(src, TILE_PX, TILE_PX, f);
+        uint32_t *up = ups[t];
         [g_tiles replaceRegion:MTLRegionMake2D(0, 0, (NSUInteger)px, (NSUInteger)px)
                    mipmapLevel:0
                          slice:(NSUInteger)t
@@ -938,6 +949,7 @@ static int ensure_tiles(void)
                  bytesPerImage:(NSUInteger)px * px * 4];
         free(up);
     }
+    free(ups);
     static id<MTLCommandQueue> q;
     if (!q) q = [presenter_device() newCommandQueue];
     id<MTLCommandBuffer> cb = [q commandBuffer];

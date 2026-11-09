@@ -33,7 +33,7 @@ add_executable(gta2 MACOSX_BUNDLE
   runtime/src/platform/keymap.c
   runtime/src/video/dmavideo.c
   runtime/src/input/dinput.c
-  runtime/src/input/gamepad.m
+  runtime/src/input/gamepad.m runtime/src/render3d/texpack.m
   runtime/src/audio/mixer.c
   runtime/src/audio/miles.c
   runtime/src/video/presenter.m
@@ -41,7 +41,7 @@ add_executable(gta2 MACOSX_BUNDLE
   runtime/src/debug/watch.c
   runtime/src/render3d/world_data.c
   runtime/src/render3d/upscale.c
-  runtime/src/render3d/texpack.c
+  runtime/src/render3d/texpack.m
   runtime/src/input/player.c
   runtime/src/render3d/world3d.m
   runtime/src/render/render_metal.m
@@ -50,7 +50,7 @@ add_executable(gta2 MACOSX_BUNDLE
 target_include_directories(gta2 PRIVATE runtime/include runtime/src ${GEN}/gen)
 target_compile_options(gta2 PRIVATE -Wall -Wextra -Wno-unused-parameter -fno-strict-aliasing)
 set_source_files_properties(runtime/src/render3d/world3d.m runtime/src/winapi/user32.m runtime/src/video/presenter.m
-  runtime/src/input/gamepad.m
+  runtime/src/input/gamepad.m runtime/src/render3d/texpack.m
   runtime/src/render/render_metal.m
   PROPERTIES COMPILE_FLAGS -fobjc-arc)
 target_link_libraries(gta2 PRIVATE "-framework AppKit" "-framework QuartzCore" "-framework Metal"
