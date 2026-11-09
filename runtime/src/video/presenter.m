@@ -54,6 +54,13 @@ static id<MTLTexture> g_replay[REPLAY_FRAMES];
 static uint64_t g_replay_count; /* frames recorded so far */
 static id<MTLRenderPipelineState> g_copy;
 static int g_replay_save;
+static dispatch_group_t g_replay_group; /* in-flight replay writes */
+
+/* At exit (Cmd-Q right after saving a replay): let the PNG writes finish. */
+static void replay_wait(void)
+{
+    if (g_replay_group) dispatch_group_wait(g_replay_group, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+}
 
 void presenter_save_replay(void) { g_replay_save = 1; }
 
@@ -114,7 +121,11 @@ static void replay_write(void)
     }
     NSString *ns = [NSString stringWithUTF8String:dir];
     rt_log("presenter: saving replay (%llu frames) to %s", (unsigned long long)n, dir);
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+    if (!g_replay_group) {
+        g_replay_group = dispatch_group_create();
+        atexit(replay_wait);
+    }
+    dispatch_group_async(g_replay_group, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         for (NSUInteger i = 0; i < frames.count; i++) {
             char path[1200];
             snprintf(path, sizeof path, "%s/frame_%03lu.png", ns.UTF8String, (unsigned long)i);
