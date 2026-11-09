@@ -52,6 +52,65 @@ const GBlock *world_map_block(const WorldMap *m, int x, int y, int z)
 static char g_style_path[1024];
 
 void world_note_style_path(const char *p) { snprintf(g_style_path, sizeof g_style_path, "%s", p); }
+/* ---- tile animation ---- */
+typedef struct { uint16_t base; uint8_t rate, repeat, len; uint16_t tiles[256]; } TileAnim;
+static char g_map_path[1024], g_anim_for[1024];
+static TileAnim *g_anims;
+static int g_nanims;
+static uint32_t g_anim_frame;
+
+void world_note_map_path(const char *p) { snprintf(g_map_path, sizeof g_map_path, "%s", p); }
+void world_anim_tick(void) { g_anim_frame++; }
+
+static void anim_load(void)
+{
+    snprintf(g_anim_for, sizeof g_anim_for, "%s", g_map_path);
+    free(g_anims);
+    g_anims = NULL;
+    g_nanims = 0;
+    FILE *f = fopen(g_map_path, "rb");
+    if (!f) return;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    uint8_t *d = malloc((size_t)n);
+    if (fread(d, 1, (size_t)n, f) != (size_t)n || memcmp(d, "GBMP", 4)) n = 0;
+    fclose(f);
+    for (long off = 6; off + 8 <= n;) {
+        uint32_t len;
+        memcpy(&len, d + off + 4, 4);
+        if (!memcmp(d + off, "ANIM", 4)) {
+            for (long j = off + 8, e = off + 8 + (long)len; j + 6 <= e;) {
+                TileAnim a = { 0 };
+                memcpy(&a.base, d + j, 2);
+                a.rate = d[j + 2], a.repeat = d[j + 3], a.len = d[j + 4];
+                for (int k = 0; k < a.len; k++) memcpy(&a.tiles[k], d + j + 6 + 2 * k, 2);
+                j += 6 + 2 * (long)a.len;
+                if (!a.len) continue;
+                g_anims = realloc(g_anims, sizeof *g_anims * (size_t)(g_nanims + 1));
+                g_anims[g_nanims++] = a;
+            }
+        }
+        off += 8 + (long)len;
+    }
+    free(d);
+    rt_log("world: map %s: %d tile animations", g_map_path, g_nanims);
+}
+
+unsigned world_tile_anim(unsigned tile)
+{
+    if (!tile || !g_map_path[0]) return tile;
+    if (strcmp(g_anim_for, g_map_path)) anim_load();
+    for (int i = 0; i < g_nanims; i++) {
+        const TileAnim *a = &g_anims[i];
+        if (a->base != tile) continue;
+        uint32_t step = g_anim_frame / (a->rate ? a->rate : 1u);
+        if (a->repeat && step >= (uint32_t)a->repeat * a->len) return a->tiles[a->len - 1];
+        return a->tiles[step % a->len];
+    }
+    return tile;
+}
+
 const char *world_style_path(void) { return g_style_path[0] ? g_style_path : NULL; }
 
 int world_style_load(const char *path, WorldStyle *s)

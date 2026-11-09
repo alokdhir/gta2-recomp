@@ -263,7 +263,7 @@ static void push_wall_2s_ao(float ax, float ay, float bx, float by, float z, flo
                             uint16_t back, float shade, float foot)
 {
     if (ha <= 0.001f && hb <= 0.001f) return;
-    unsigned tile = FACE_TILE(face);
+    unsigned tile = world_tile_anim(FACE_TILE(face));
     if (!tile) return;
     const float c[4][3] = { { ax, ay, z + ha }, { bx, by, z + hb }, { bx, by, z }, { ax, ay, z } };
     float uv[4][2], uv2[4][2];
@@ -276,7 +276,7 @@ static void push_wall_2s_ao(float ax, float ay, float bx, float by, float z, flo
         float t[2];
         memcpy(t, uv2[0], 8); memcpy(uv2[0], uv2[1], 8); memcpy(uv2[1], t, 8);
         memcpy(t, uv2[2], 8); memcpy(uv2[2], uv2[3], 8); memcpy(uv2[3], t, 8);
-        tile2 = FACE_TILE(back);
+        tile2 = world_tile_anim(FACE_TILE(back));
     } else {
         memcpy(uv2, uv, sizeof uv);
     }
@@ -302,7 +302,7 @@ static float g_lid_ao[4] = { 1, 1, 1, 1 }; /* NW NE SE SW brightness for the nex
 
 static void push_lid(float X, float Y, float z, const float (*pts)[2], int n, const float h[4], uint16_t face)
 {
-    unsigned tile = FACE_TILE(face);
+    unsigned tile = world_tile_anim(FACE_TILE(face));
     if (!tile || n < 3) return;
     float v[4][3], uv[4][2];
     for (int i = 0; i < n; i++) {

@@ -53,5 +53,13 @@ const char *world_style_path(void);
 int world_style_load(const char *path, WorldStyle *s);
 void world_style_free(WorldStyle *s);
 
+/* ---- tile animation (the map's ANIM chunk: water, flickering signs) ---- */
+/* Called by CreateFileA when the game opens a .gmp. */
+void world_note_map_path(const char *host_path);
+/* One game frame passed (the game's BeginScene). */
+void world_anim_tick(void);
+/* The tile to show this frame for a face's base tile. */
+unsigned world_tile_anim(unsigned tile);
+
 /* Debug: GTA2_DUMP_MAP=out.png writes a top-down image of the live map once. */
 void world_debug_dump(void);

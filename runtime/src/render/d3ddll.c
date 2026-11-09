@@ -670,6 +670,7 @@ static void gbh_BlitImage(void)
 
 static void gbh_BeginScene(void)
 {
+    world_anim_tick();
     if (g_frame == 1 && getenv("GTA2_DUMP_FRAME")) g_dump_frame = (unsigned)atoi(getenv("GTA2_DUMP_FRAME"));
     if (g_dump_on_tiles < 0) g_dump_on_tiles = getenv("GTA2_DUMP_TILES") != NULL;
     if (g_dump_on_tiles == 1 && g_tiles_this_scene >= 50) {

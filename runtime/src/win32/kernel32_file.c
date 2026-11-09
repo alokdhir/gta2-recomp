@@ -149,6 +149,7 @@ static void CreateFileA(void)
     }
     size_t pl = strlen(path);
     if (pl > 4 && !strcasecmp(path + pl - 4, ".sty")) world_note_style_path(path);
+    if (pl > 4 && !strcasecmp(path + pl - 4, ".gmp")) world_note_map_path(path);
     uint32_t h = win32_new_handle(WIN32_H_FILE, fd);
     win32_get_handle(h, WIN32_H_FILE)->path = path;
     win32_set_last_error(0);
