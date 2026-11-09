@@ -42,6 +42,15 @@ void sub_00481F20(void)
     RETURN_STDCALL(0, 2);
 }
 
+/* 0x00481E00  movie_step(): the front end calls it every frame after
+ * play_movie until it returns 1 (decodes and blits a Bink frame, closes the
+ * movie after the last). Our movie has already played: report it finished. */
+void sub_00481E00(void)
+{
+    g_eax = (g_eax & ~0xFFu) | 1u;
+    g_esp += 4u;
+}
+
 /* 0x0041E7A0  camera: computes the "visible" rectangle that traffic spawning
  * and recycling, pedestrian spawning and the object draw all test against.
  * It scales the zoom by two static 16.14 Fixed constants, 0.5 at 0x5E3F54 and
