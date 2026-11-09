@@ -111,6 +111,12 @@ int world3d_unproject_zf(float sx, float sy, float zf, float out[3])
     return world3d_unproject(sx, sy, out[2], &out[0], &out[1]);
 }
 
+int world3d_camera(float out[3])
+{
+    out[0] = g_cam.camx, out[1] = g_cam.camy, out[2] = g_cam.camz;
+    return g_cam.valid;
+}
+
 int world3d_unproject(float sx, float sy, float z, float *wx, float *wy)
 {
     if (!g_cam.valid || g_cam.f <= 0) return 0;

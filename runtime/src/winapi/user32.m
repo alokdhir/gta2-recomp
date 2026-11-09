@@ -19,6 +19,7 @@
 #include "render3d/world3d.h"
 #include "video/presenter.h"
 void d3ddll_probe_next_frame(void);
+float d3ddll_player_angle(void);
 #include "platform/keymap.h"
 #include "winapi/imports.h"
 #include "winapi/user32_api.h"
@@ -185,10 +186,14 @@ static void key_event(NSEvent *e, int down)
     key_transition(hwnd, e.keyCode, down, down && e.isARepeat, down ? e.characters : nil);
 }
 
-/* GTA2_KEYS="ms:key[,ms:key...]": press (and release 80 ms later) keys at
- * times after startup, for unattended test runs. Keys: return escape space
- * up down left right tab, or a single letter/digit. */
+/* GTA2_KEYS="ms:key[:hold_ms][,...]": press (and release 80 ms, or hold_ms,
+ * later) keys at times after startup, for unattended test runs. Keys: return
+ * escape space up down left right tab, or a single letter/digit.
+ * GTA2_MEMSNAP="ms[,ms...]" (with GTA2_MEMSNAP_DIR): dump the game image's
+ * data and the guest heap at those times, for finding game variables. */
 typedef struct { uint64_t at; unsigned mac; int down; } ScriptKey;
+static uint64_t g_snap_at[32];
+static int g_nsnap, g_snap_pos;
 static ScriptKey g_script[256];
 static int g_nscript, g_script_pos;
 static uint64_t g_t0;
@@ -219,13 +224,77 @@ static void script_load(void)
         char *colon = strchr(tok, ':');
         if (!colon) continue;
         *colon = 0;
+        char *hold = strchr(colon + 1, ':');
+        uint64_t dur = 80;
+        if (hold) { *hold = 0; dur = strtoull(hold + 1, NULL, 10); }
         int code = mac_code_for(colon + 1);
         if (code < 0) { rt_log("GTA2_KEYS: unknown key %s", colon + 1); continue; }
         uint64_t at = strtoull(tok, NULL, 10);
         g_script[g_nscript++] = (ScriptKey){ at, (unsigned)code, 1 };
-        g_script[g_nscript++] = (ScriptKey){ at + 80, (unsigned)code, 0 };
+        g_script[g_nscript++] = (ScriptKey){ at + dur, (unsigned)code, 0 };
     }
     free(copy);
+    /* keep the script in time order (holds overlap later presses) */
+    for (int i = 1; i < g_nscript; i++)
+        for (int j = i; j > 0 && g_script[j - 1].at > g_script[j].at; j--) {
+            ScriptKey t = g_script[j]; g_script[j] = g_script[j - 1]; g_script[j - 1] = t;
+        }
+    const char *m = getenv("GTA2_MEMSNAP");
+    if (m) {
+        char *c2 = strdup(m), *sv = NULL;
+        for (char *tok = strtok_r(c2, ",", &sv); tok && g_nsnap < 32; tok = strtok_r(NULL, ",", &sv))
+            g_snap_at[g_nsnap++] = strtoull(tok, NULL, 10);
+        free(c2);
+    }
+}
+
+/* GTA2_POKE="ms:addr:value[,...]": write a 16-bit value into game memory at
+ * a time (hex addr), for testing what a variable does. */
+static void poke_run(uint64_t t)
+{
+    static struct { uint64_t at; uint32_t addr; int v; } pk[32];
+    static int n = -1, pos;
+    if (n < 0) {
+        n = 0;
+        const char *e = getenv("GTA2_POKE");
+        char *c = e ? strdup(e) : NULL, *sv = NULL;
+        for (char *tok = c ? strtok_r(c, ",", &sv) : NULL; tok && n < 32; tok = strtok_r(NULL, ",", &sv)) {
+            unsigned long long at; unsigned addr; int v;
+            if (sscanf(tok, "%llu:%x:%d", &at, &addr, &v) == 3) pk[n].at = at, pk[n].addr = addr, pk[n++].v = v;
+        }
+        free(c);
+    }
+    while (pos < n && pk[pos].at <= t) {
+        if (pk[pos].v != -32768) *(int16_t *)XBOX_PTR(pk[pos].addr) = (int16_t)pk[pos].v; /* -32768: just log */
+        float c[3];
+        world3d_camera(c);
+        rt_log("poke %08X = %d (now %d) at %llu ms (camera %.2f, %.2f)", pk[pos].addr, pk[pos].v, *(int16_t *)XBOX_PTR(pk[pos].addr), (unsigned long long)t, c[0], c[1]);
+        pos++;
+    }
+}
+
+static void memsnap_run(uint64_t t)
+{
+    poke_run(t);
+    while (g_snap_pos < g_nsnap && g_snap_at[g_snap_pos] <= t) {
+        const char *dir = getenv("GTA2_MEMSNAP_DIR") ?: ".";
+        char path[1100];
+        snprintf(path, sizeof path, "%s/snap_%02d.bin", dir, g_snap_pos);
+        FILE *f = fopen(path, "wb");
+        if (f) {
+            /* header: image lo, image hi, heap lo, heap hi; then the bytes */
+            uint32_t hdr[4] = { 0x400000u, 0x700000u, GUEST_HEAP_LO, guest_heap_top() };
+            fwrite(hdr, 4, 4, f);
+            fwrite((const void *)XBOX_PTR(hdr[0]), 1, hdr[1] - hdr[0], f);
+            fwrite((const void *)XBOX_PTR(hdr[2]), 1, hdr[3] - hdr[2], f);
+            fclose(f);
+        }
+        float c[3];
+        world3d_camera(c);
+        rt_log("memsnap %d at %llu ms -> %s (camera %.2f, %.2f) player angle %.1f", g_snap_pos, (unsigned long long)t,
+               path, c[0], c[1], d3ddll_player_angle());
+        g_snap_pos++;
+    }
 }
 
 static uint32_t first_hwnd(void)
@@ -239,9 +308,12 @@ void user32_inject_key(unsigned mac_keycode, int down)
     key_transition(first_hwnd(), mac_keycode, down, 0, down && mac_keycode == 0x24 ? @"\r" : nil);
 }
 
+static void memsnap_run(uint64_t t);
+
 static void script_run(void)
 {
     uint64_t t = now_ms() - g_t0;
+    memsnap_run(t);
     while (g_script_pos < g_nscript && g_script[g_script_pos].at <= t) {
         ScriptKey *k = &g_script[g_script_pos++];
         uint32_t hwnd = 0;

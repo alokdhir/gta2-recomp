@@ -6,6 +6,9 @@
 #import <GameController/GameController.h>
 
 #include "input/gamepad.h"
+#include "guest_memory.h"
+#include "winapi/win32.h"
+#include <math.h>
 #include "winapi/imports.h"
 #include "winapi/user32_api.h"
 
@@ -19,6 +22,33 @@ static const unsigned g_mac[K_COUNT] = {
 };
 static int g_held[K_COUNT];
 static int g_announced;
+
+int d3ddll_player_on_foot(void);
+
+/* The player's facing, in GTA2's units: 0..1439 quarter degrees, 720 = north
+ * (up the screen), increasing anticlockwise. Found by snapshotting memory
+ * while turning: [0x5E5BC0] is the player's ped (plus a constant), its
+ * sprite pointer is at +0x190 and the sprite's rotation at +0x40. Returns
+ * NULL whenever the chain doesn't look valid. */
+static int16_t *player_facing(void)
+{
+    uint32_t ped = MEM32(0x5E5BC0u);
+    if (ped < GUEST_HEAP_LO || ped + 0x200u > guest_heap_top()) return NULL;
+    uint32_t spr = MEM32(ped + 0x190u);
+    if (spr < GUEST_HEAP_LO || spr + 0x44u > guest_heap_top()) return NULL;
+    int16_t *a = (int16_t *)XBOX_PTR(spr + 0x40u);
+    return *a >= 0 && *a < 1440 ? a : NULL;
+}
+
+/* Stick-direction movement on foot: the player turns to face where the left
+ * stick points and walks. Tank controls (left/right turn) stay on the d-pad,
+ * and in cars. Registry screen/mac_tank_controls=1 turns it off. */
+static int stick_mode(void)
+{
+    static int m = -1;
+    if (m < 0) m = !reg_get_dword("screen", "mac_tank_controls", 0);
+    return m;
+}
 
 void gamepad_poll(void)
 {
@@ -57,10 +87,21 @@ void gamepad_poll(void)
 
     const float t = 0.5f;
     int want[K_COUNT] = { 0 };
-    want[K_UP] = g.leftThumbstick.yAxis.value > t || g.dpad.up.pressed || g.rightTrigger.value > 0.3f;
-    want[K_DOWN] = g.leftThumbstick.yAxis.value < -t || g.dpad.down.pressed || g.leftTrigger.value > 0.3f;
-    want[K_LEFT] = g.leftThumbstick.xAxis.value < -t || g.dpad.left.pressed;
-    want[K_RIGHT] = g.leftThumbstick.xAxis.value > t || g.dpad.right.pressed;
+    float sx = g.leftThumbstick.xAxis.value, sy = g.leftThumbstick.yAxis.value;
+    int16_t *facing = stick_mode() && d3ddll_player_on_foot() ? player_facing() : NULL;
+    if (facing && sx * sx + sy * sy > 0.35f * 0.35f) {
+        /* bearing anticlockwise from north, in quarter degrees */
+        float deg = atan2f(-sx, sy) * 57.29578f;
+        int v = (int)lroundf(720.0f + 4.0f * deg) % 1440;
+        *facing = (int16_t)(v < 0 ? v + 1440 : v);
+        sx = 0, sy = 1; /* and walk forward */
+    } else if (facing) {
+        sx = sy = 0; /* stick at rest: stand still (no stick turning on foot) */
+    }
+    want[K_UP] = sy > t || g.dpad.up.pressed || g.rightTrigger.value > 0.3f;
+    want[K_DOWN] = sy < -t || g.dpad.down.pressed || g.leftTrigger.value > 0.3f;
+    want[K_LEFT] = sx < -t || g.dpad.left.pressed;
+    want[K_RIGHT] = sx > t || g.dpad.right.pressed;
     want[K_JUMP] = g.buttonA.pressed;
     want[K_ENTER] = g.buttonB.pressed;
     want[K_ATTACK] = g.buttonX.pressed;

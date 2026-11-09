@@ -10,6 +10,8 @@
 #define GUEST_IMAGE_BASE  0x00400000u
 #define GUEST_HEAP_LO     0x10000000u
 #define GUEST_HEAP_HI     0xE0000000u
+/* Highest address handed out by the guest heap so far. */
+uint32_t guest_heap_top(void);
 
 typedef struct {
     uint32_t entry;

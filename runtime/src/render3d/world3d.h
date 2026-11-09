@@ -31,6 +31,8 @@ void world3d_end_scene(void);
  * Returns 0 before the first fit. */
 /* Hook the shadow/mesh prepass into the presenter (once at startup). */
 void world3d_install_prepass(void);
+/* The fitted camera position (world units); 0 before the first fit. */
+int world3d_camera(float out[3]);
 
 int world3d_unproject(float sx, float sy, float z, float *wx, float *wy);
 /* Screen pixel + the game's 1/depth -> world position (x, y, z). */

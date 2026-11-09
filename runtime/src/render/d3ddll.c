@@ -322,6 +322,11 @@ static int map_prim(uint32_t verts, unsigned n)
  * mode they become real quads in the world; returns 1 if taken. */
 #define SPRITE_VERTS 0x0066FE18u
 
+static float g_near_d = 1e9f, g_near_angle, g_player_angle, g_near_size, g_player_size;
+float d3ddll_player_angle(void) { return g_player_angle; }
+/* The sprite under the camera is person-sized (on foot), not a car. */
+int d3ddll_player_on_foot(void) { return world3d_enabled() && g_player_size > 0 && g_player_size < 32; }
+
 static int sprite_3d(uint32_t flags, uint32_t rec, uint32_t verts, uint8_t shade)
 {
     if (verts != SPRITE_VERTS || !world3d_enabled() || (flags & F_EXPAND)) return 0;
@@ -346,6 +351,19 @@ static int sprite_3d(uint32_t flags, uint32_t rec, uint32_t verts, uint8_t shade
         q[i] = (WSpriteVert){ w[0], w[1], w[2], f[6] / tw, f[7] / th, col };
     }
     world3d_sprite(q, tex, (int)blend_for(flags));
+    /* debug: facing of the sprite nearest the camera (the player on foot) */
+    {
+        float cam[3];
+        if (world3d_camera(cam)) {
+            float cx = (q[0].x + q[2].x) * 0.5f - cam[0], cy = (q[0].y + q[2].y) * 0.5f - cam[1];
+            float d = cx * cx + cy * cy;
+            if (d < g_near_d) {
+                g_near_d = d;
+                g_near_angle = atan2f(q[1].y - q[0].y, q[1].x - q[0].x) * 57.29578f;
+                g_near_size = tw > th ? tw : th;
+            }
+        }
+    }
     return 1;
 }
 
@@ -712,6 +730,8 @@ static void gbh_BeginScene(void)
 
 static void gbh_EndScene(void)
 {
+    if (g_near_d < 1e9f) g_player_angle = g_near_angle, g_player_size = g_near_size;
+    g_near_d = 1e9f;
     world3d_end_scene();
     RETURN_STDCALL(0, 0);
 }

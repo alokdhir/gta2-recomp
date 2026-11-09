@@ -96,6 +96,7 @@ void guest_tib_init(void)
 #define NCLASS (SMALL_MAX / 16u + 1u)
 
 static uint32_t g_bump = GUEST_HEAP_LO;
+uint32_t guest_heap_top(void) { return g_bump; }
 static uint32_t g_small_free[NCLASS];
 static uint32_t g_large_free; /* singly linked via the first payload word */
 
