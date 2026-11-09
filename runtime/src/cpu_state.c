@@ -84,7 +84,8 @@ static void save_misses(void)
     if (!f) return;
     fputs("[\n", f);
     for (unsigned i = 0; i < g_nmisses; i++)
-        fprintf(f, " {\"start\": \"0x%08X\"}%s\n", g_misses[i], i + 1 < g_nmisses ? "," : "");
+        fprintf(f, " {\"start\": \"0x%08X\", \"observed\": true}%s\n", g_misses[i],
+                i + 1 < g_nmisses ? "," : "");
     fputs("]\n", f);
     fclose(f);
     rt_log("icall: %u missed targets saved to %s (re-run scripts/translate.sh)", g_nmisses, path);
@@ -129,5 +130,6 @@ void recomp_unresolved_stub_hit(uint32_t va)
     static unsigned n;
     for (unsigned i = 0; i < n; i++) if (seen[i] == va) return;
     if (n < 64) seen[n++] = va;
-    rt_log("UNRESOLVED STUB hit: %08X (re-run scripts/translate.sh)", va);
+    rt_log("UNRESOLVED STUB hit: %08X (recorded as an observed seed; re-run scripts/translate.sh)", va);
+    recomp_icall_fail_log(va); /* same seed file: execution really goes here */
 }
