@@ -47,6 +47,13 @@ void gamepad_poll(void)
         }
         combo_prev[i] = combo[i];
     }
+    /* PlayStation touchpad click (unused by GTA2): instant replay, easy to hit mid-drive */
+    static int pad_prev;
+    int pad_click = 0;
+    if ([g isKindOfClass:GCDualShockGamepad.class]) pad_click = ((GCDualShockGamepad *)g).touchpadButton.pressed;
+    if ([g isKindOfClass:GCDualSenseGamepad.class]) pad_click = ((GCDualSenseGamepad *)g).touchpadButton.pressed;
+    if (pad_click && !pad_prev) user32_action_replay();
+    pad_prev = pad_click;
 
     const float t = 0.5f;
     int want[K_COUNT] = { 0 };
