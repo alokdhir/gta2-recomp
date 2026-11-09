@@ -6,8 +6,12 @@
  * (for direct calls and the dispatch table alike). Calling convention as for a
  * native import (see win32/imports.h).
  */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "recomp_types.h"
 #include "win32/imports.h"
+#include "debug/watch.h"
 
 /* 0x004031C0  GetDXVersion(DWORD *version, DWORD *platform) -- the DirectX SDK
  * probe that loads DDRAW.DLL and queries COM interfaces. Our renderer is
@@ -18,4 +22,5 @@ void sub_004031C0(void)
     MEM32(ARG(1)) = 2; /* VER_PLATFORM_WIN32_NT */
     RETURN_STDCALL(0, 2);
 }
+
 

@@ -121,3 +121,13 @@ uint64_t xbox_ReadTimeStampCounter(void)
 {
     return mach_absolute_time();
 }
+
+/* A direct call reached a target the disassembler never translated. */
+void recomp_unresolved_stub_hit(uint32_t va)
+{
+    static uint32_t seen[64];
+    static unsigned n;
+    for (unsigned i = 0; i < n; i++) if (seen[i] == va) return;
+    if (n < 64) seen[n++] = va;
+    rt_log("UNRESOLVED STUB hit: %08X (re-run scripts/translate.sh)", va);
+}

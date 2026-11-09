@@ -15,6 +15,8 @@ endif()
 add_library(gta2_game OBJECT ${GEN_SOURCES})
 target_include_directories(gta2_game PRIVATE runtime/include ${GEN}/gen)
 target_compile_options(gta2_game PRIVATE -w -O1 -fno-strict-aliasing)
+# Any direct-call target the disassembler still missed logs when it is hit.
+target_compile_options(gta2_game PRIVATE -include ${CMAKE_SOURCE_DIR}/runtime/include/recomp_stub_hook.h)
 
 add_executable(gta2 MACOSX_BUNDLE
   runtime/src/main.c
@@ -36,6 +38,7 @@ add_executable(gta2 MACOSX_BUNDLE
   runtime/src/audio/miles.c
   runtime/src/video/presenter.m
   runtime/src/render/d3ddll.c
+  runtime/src/debug/watch.c
   runtime/src/render/render_metal.m
   ${GEN}/imports_table.c
   $<TARGET_OBJECTS:gta2_game>)

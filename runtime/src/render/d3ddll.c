@@ -11,11 +11,13 @@
  * (MIT) and the original DLL's code; the implementation is our own.
  */
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "guest_memory.h"
 #include "render/render.h"
+#include "debug/watch.h"
 #include "win32/imports.h"
 #include "win32/modules.h"
 
@@ -539,6 +541,7 @@ static void gbh_BeginScene(void)
     }
     g_tiles_this_scene = 0;
     g_frame++;
+    watch_rearm();
     if (g_frame % 100 == 0) rt_log("scene %u", g_frame);
     render_begin_frame();
     RETURN_STDCALL(0, 0);
