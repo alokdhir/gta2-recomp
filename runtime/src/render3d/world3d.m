@@ -9,6 +9,8 @@
  * camz is the mean of z + 1/zf over observed vertices; (cx, f, camx) and
  * (cy, f, camy) come from linear least squares on the same vertices. */
 #import <Metal/Metal.h>
+#import <ImageIO/ImageIO.h>
+#include <sys/stat.h>
 
 #include <math.h>
 #include <string.h>
@@ -803,6 +805,50 @@ static int setup(void)
  * shimmer. Replacement textures would slot in here, ahead of the upscaler. */
 static int g_tiles_scale;
 
+/* Texture pack: <game dir>/textures/<style name>/tiles/NNNN.png, any of the
+ * style's tiles replaced by a high-resolution image (scripts/texpack.py).
+ * GTA2_NO_PACK=1 ignores it. */
+static void pack_dir(const char *style_path, char *out, size_t n)
+{
+    const char *base = strrchr(style_path, '/');
+    base = base ? base + 1 : style_path;
+    const char *dot = strrchr(base, '.');
+    int len = dot ? (int)(dot - base) : (int)strlen(base);
+    snprintf(out, n, "textures/%.*s/tiles", len, base);
+}
+
+static int pack_present(const char *dir)
+{
+    if (getenv("GTA2_NO_PACK")) return 0;
+    struct stat sb;
+    return stat(dir, &sb) == 0 && S_ISDIR(sb.st_mode);
+}
+
+/* Load a pack image as px*px BGRA (0xAARRGGBB words); NULL if absent or wrong size. */
+static uint32_t *pack_load(const char *dir, int t, int px)
+{
+    char file[1200];
+    snprintf(file, sizeof file, "%s/%04d.png", dir, t);
+    CFURLRef url = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)file, (CFIndex)strlen(file), false);
+    CGImageSourceRef src = url ? CGImageSourceCreateWithURL(url, NULL) : NULL;
+    if (url) CFRelease(url);
+    CGImageRef img = src ? CGImageSourceCreateImageAtIndex(src, 0, NULL) : NULL;
+    if (src) CFRelease(src);
+    if (!img) return NULL;
+    uint32_t *px32 = calloc((size_t)px * px, 4);
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGContextRef ctx = CGBitmapContextCreate(px32, (size_t)px, (size_t)px, 8, (size_t)px * 4, cs,
+                                             kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
+    CGColorSpaceRelease(cs);
+    if (ctx) {
+        CGContextSetInterpolationQuality(ctx, kCGInterpolationHigh);
+        CGContextDrawImage(ctx, CGRectMake(0, 0, px, px), img);
+        CGContextRelease(ctx);
+    }
+    CGImageRelease(img);
+    return px32;
+}
+
 static int ensure_tiles(void)
 {
     const char *path = world_style_path();
@@ -811,7 +857,11 @@ static int ensure_tiles(void)
     if (g_tiles && !strcmp(path, g_tiles_for) && f == g_tiles_scale) return 1;
     WorldStyle st;
     if (!world_style_load(path, &st)) return 0;
-    int px = TILE_PX * f;
+    char pdir[1100];
+    pack_dir(path, pdir, sizeof pdir);
+    int pack = pack_present(pdir);
+    if (pack) f = 4; /* pack tiles are 256x256 */
+    int px = TILE_PX * f, from_pack = 0;
     MTLTextureDescriptor *td = [MTLTextureDescriptor new];
     td.textureType = MTLTextureType2DArray;
     td.pixelFormat = MTLPixelFormatBGRA8Unorm;
@@ -823,7 +873,9 @@ static int ensure_tiles(void)
     g_tiles = [presenter_device() newTextureWithDescriptor:td];
     for (int t = 0; t < st.ntiles; t++) {
         const uint32_t *src = st.rgba + (size_t)t * TILE_PX * TILE_PX;
-        uint32_t *up = f > 1 ? upscale_pixels(src, TILE_PX, TILE_PX, f) : NULL;
+        uint32_t *up = pack ? pack_load(pdir, t, px) : NULL;
+        if (up) from_pack++;
+        else if (f > 1) up = upscale_pixels(src, TILE_PX, TILE_PX, f);
         [g_tiles replaceRegion:MTLRegionMake2D(0, 0, (NSUInteger)px, (NSUInteger)px)
                    mipmapLevel:0
                          slice:(NSUInteger)t
@@ -841,8 +893,9 @@ static int ensure_tiles(void)
     [cb commit];
     [cb waitUntilCompleted];
     snprintf(g_tiles_for, sizeof g_tiles_for, "%s", path);
-    g_tiles_scale = f;
-    rt_log("world3d: %d tiles at %dx%d (upscale x%d)", st.ntiles, px, px, f);
+    g_tiles_scale = upscale_factor(); /* the requested factor, which the cache check compares */
+    rt_log("world3d: %d tiles at %dx%d (upscale x%d, %d from pack %s)", st.ntiles, px, px, f, from_pack,
+           pack ? pdir : "-");
     world_style_free(&st);
     return 1;
 }
