@@ -171,13 +171,19 @@ static void AIL_set_sample_pan(void)
     RETURN_STDCALL(0, 2);
 }
 
-static void AIL_set_sample_loop_count(void) { mixer_voice_loop(voice_of(ARG(0)), (int)ARG(1), 0, 0); RETURN_STDCALL(0, 2); }
+static void AIL_set_sample_loop_count(void)
+{
+    if (getenv("GTA2_TRACE_AUDIO")) rt_log("set_sample_loop_count %08X %d", ARG(0), (int)ARG(1));
+    mixer_voice_loop(voice_of(ARG(0)), (int)ARG(1), 0, 0);
+    RETURN_STDCALL(0, 2);
+}
 
 static void AIL_set_sample_loop_block(void)
 {
     /* keeps the loop count; Miles treats end -1 as "end of sample" */
     int v = voice_of(ARG(0));
-    if (v >= 0) mixer_voice_loop(v, 0, (int32_t)ARG(1), (int32_t)ARG(2));
+    if (getenv("GTA2_TRACE_AUDIO")) rt_log("set_sample_loop_block %08X %d..%d", ARG(0), (int)ARG(1), (int)ARG(2));
+    if (v >= 0) mixer_voice_loop(v, -1, (int32_t)ARG(1), (int32_t)ARG(2));
     RETURN_STDCALL(0, 3);
 }
 
@@ -189,8 +195,25 @@ static void trace_start(const char *what, uint32_t h)
            MEM32(h + 24), (double)mixer_out_frames() / 44100.0);
 }
 
-static void AIL_start_sample(void) { trace_start("start_sample", ARG(0)); mixer_voice_start(voice_of(ARG(0))); RETURN_STDCALL(0, 1); }
-static void AIL_end_sample(void) { mixer_voice_stop(voice_of(ARG(0))); RETURN_STDCALL(0, 1); }
+/* GTA2_AUDIO_SOLO=samples|streams: play only that class (debugging which sound is wrong) */
+static int solo_blocks(const char *cls)
+{
+    const char *s = getenv("GTA2_AUDIO_SOLO");
+    return s && strcmp(s, cls) != 0;
+}
+
+static void AIL_start_sample(void)
+{
+    trace_start("start_sample", ARG(0));
+    if (!solo_blocks("samples")) mixer_voice_start(voice_of(ARG(0)));
+    RETURN_STDCALL(0, 1);
+}
+static void AIL_end_sample(void)
+{
+    if (getenv("GTA2_TRACE_AUDIO")) rt_log("end_sample %08X", ARG(0));
+    mixer_voice_stop(voice_of(ARG(0)));
+    RETURN_STDCALL(0, 1);
+}
 static void AIL_sample_status(void) { RETURN_STDCALL(status_of(ARG(0)), 1); }
 
 /* ---- 3D providers & samples ------------------------------------------------------- */
@@ -295,8 +318,13 @@ static void AIL_set_3D_sample_volume(void)
 
 static void AIL_set_3D_sample_playback_rate(void) { mixer_voice_rate(voice_of(ARG(0)), ARG(1)); RETURN_STDCALL(0, 2); }
 static void AIL_set_3D_sample_loop_count(void) { mixer_voice_loop(voice_of(ARG(0)), (int)ARG(1), 0, 0); RETURN_STDCALL(0, 2); }
-static void AIL_set_3D_sample_loop_block(void) { mixer_voice_loop(voice_of(ARG(0)), 0, (int32_t)ARG(1), (int32_t)ARG(2)); RETURN_STDCALL(0, 3); }
-static void AIL_start_3D_sample(void) { trace_start("start_3D", ARG(0)); mixer_voice_start(voice_of(ARG(0))); RETURN_STDCALL(0, 1); }
+static void AIL_set_3D_sample_loop_block(void) { mixer_voice_loop(voice_of(ARG(0)), -1, (int32_t)ARG(1), (int32_t)ARG(2)); RETURN_STDCALL(0, 3); }
+static void AIL_start_3D_sample(void)
+{
+    trace_start("start_3D", ARG(0));
+    if (!solo_blocks("samples")) mixer_voice_start(voice_of(ARG(0)));
+    RETURN_STDCALL(0, 1);
+}
 static void AIL_end_3D_sample(void) { mixer_voice_stop(voice_of(ARG(0))); RETURN_STDCALL(0, 1); }
 static void AIL_3D_sample_status(void) { RETURN_STDCALL(status_of(ARG(0)), 1); }
 
@@ -319,7 +347,11 @@ static void AIL_open_stream(void)
 }
 
 static void AIL_close_stream(void) { free_handle(ARG(0)); RETURN_STDCALL(0, 1); }
-static void AIL_start_stream(void) { mixer_voice_start(voice_of(ARG(0))); RETURN_STDCALL(0, 1); }
+static void AIL_start_stream(void)
+{
+    if (!solo_blocks("streams")) mixer_voice_start(voice_of(ARG(0)));
+    RETURN_STDCALL(0, 1);
+}
 static void AIL_stream_status(void) { RETURN_STDCALL(status_of(ARG(0)), 1); }
 
 static void AIL_set_stream_volume(void)

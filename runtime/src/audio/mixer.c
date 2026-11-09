@@ -420,7 +420,7 @@ void mixer_voice_loop(int v, int count, int32_t start_byte, int32_t end_byte)
     VOICE(v);
     Voice *x = &g_v[v];
     uint32_t fb = x->adpcm ? 0 : (uint32_t)(x->bits / 8 * x->channels);
-    x->loops_left = count;
+    if (count >= 0) x->loops_left = count; /* count < 0: keep the current loop count */
     x->loop_start = fb && start_byte > 0 ? (uint32_t)start_byte / fb : 0;
     x->loop_end = fb && end_byte > 0 ? (uint32_t)end_byte / fb : 0;
 }
