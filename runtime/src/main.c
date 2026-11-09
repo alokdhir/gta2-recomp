@@ -1,5 +1,6 @@
 /* Boot: map the guest, load gta2.exe, bind imports, run the CRT entry point. */
 #include <limits.h>
+#include <mach-o/dyld.h>
 #include <dlfcn.h>
 #include <execinfo.h>
 #include <signal.h>
@@ -45,21 +46,31 @@ static void on_fault(int sig, siginfo_t *si, void *uc)
     rt_fatal("crashed");
 }
 
+/* Where the game files are, in order: $GTA2_GAME_DIR; inside the app bundle
+ * (Contents/Resources/game_files); beside the .app or the binary (also one
+ * and two levels up, so build/gta2 and build/GTA2.app find the repository's
+ * game_files/); the current directory. */
 static const char *find_game_dir(const char *argv0)
 {
     const char *env = getenv("GTA2_GAME_DIR");
     if (env) return env;
     static char buf[PATH_MAX];
-    /* Default: game_files/ beside the repository's build dir, or the cwd. */
-    const char *candidates[] = { "game_files", "../game_files", "../../game_files" };
-    for (size_t i = 0; i < sizeof candidates / sizeof *candidates; i++) {
-        snprintf(buf, sizeof buf, "%s/gta2.exe", candidates[i]);
-        if (access(buf, R_OK) == 0) {
-            realpath(candidates[i], buf);
-            return buf;
+    char exe[PATH_MAX], dir[PATH_MAX];
+    uint32_t n = sizeof exe;
+    if (_NSGetExecutablePath(exe, &n) != 0 || !realpath(exe, dir)) snprintf(dir, sizeof dir, "%s", argv0);
+    char *slash = strrchr(dir, '/');
+    if (slash) *slash = 0;
+    const char *rel[] = { "../Resources/game_files", "game_files", "../game_files", "../../game_files",
+                          "../../../game_files", "../../../../game_files" };
+    for (size_t i = 0; i < sizeof rel / sizeof *rel; i++) {
+        char probe[PATH_MAX];
+        snprintf(probe, sizeof probe, "%s/%s/gta2.exe", dir, rel[i]);
+        if (access(probe, R_OK) == 0) {
+            snprintf(probe, sizeof probe, "%s/%s", dir, rel[i]);
+            if (realpath(probe, buf)) return buf;
         }
     }
-    (void)argv0;
+    if (access("game_files/gta2.exe", R_OK) == 0 && realpath("game_files", buf)) return buf;
     return NULL;
 }
 
@@ -68,7 +79,7 @@ int main(int argc, char **argv)
     (void)argc;
     const char *dir = find_game_dir(argv[0]);
     if (!dir) {
-        fprintf(stderr, "gta2: game files not found; set GTA2_GAME_DIR to a GTA2 v9.6 install\n");
+        fprintf(stderr, "gta2: game files not found; run scripts/setup.sh or set GTA2_GAME_DIR\n");
         return 1;
     }
     rt_log("game dir: %s", dir); /* opens GTA2_LOG relative to the launch dir */

@@ -16,7 +16,7 @@ add_library(gta2_game OBJECT ${GEN_SOURCES})
 target_include_directories(gta2_game PRIVATE runtime/include ${GEN}/gen)
 target_compile_options(gta2_game PRIVATE -w -O1 -fno-strict-aliasing)
 
-add_executable(gta2
+add_executable(gta2 MACOSX_BUNDLE
   runtime/src/main.c
   runtime/src/cpu_state.c
   runtime/src/guest_memory.c
@@ -48,3 +48,10 @@ set_source_files_properties(runtime/src/win32/user32.m runtime/src/video/present
 target_link_libraries(gta2 PRIVATE "-framework AppKit" "-framework QuartzCore" "-framework Metal"
   "-framework CoreFoundation" "-framework ImageIO" "-framework UniformTypeIdentifiers"
   "-framework CoreGraphics" "-framework AudioToolbox" "-framework GameController")
+
+# GTA2.app; build/gta2 links to its executable for the command-line scripts.
+set_target_properties(gta2 PROPERTIES
+  OUTPUT_NAME GTA2
+  MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/mac/Info.plist.in)
+add_custom_command(TARGET gta2 POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E create_symlink GTA2.app/Contents/MacOS/GTA2 ${CMAKE_BINARY_DIR}/gta2)
