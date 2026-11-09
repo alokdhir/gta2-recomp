@@ -21,6 +21,7 @@
 #include "debug/watch.h"
 #include "render3d/world_data.h"
 #include "render3d/world3d.h"
+#include "render3d/upscale.h"
 #include "win32/imports.h"
 #include "win32/modules.h"
 
@@ -57,6 +58,7 @@ typedef struct {
     int gpu;
     uint16_t pal, rev;
     uint32_t pal_hash, pixels;
+    int scale; /* upscale factor the GPU copy was built with */
 } TexCache;
 
 #define TEXCACHE 8192
@@ -99,7 +101,9 @@ static int texture_for(uint32_t rec)
     if (!w || !h || !pixels) return -1;
     TexCache *t = tex_slot(rec, 1);
     uint32_t ph = palette_hash(pal);
-    if (t->gpu >= 0 && t->pal == pal && t->rev == rev && t->pal_hash == ph && t->pixels == pixels)
+    /* sprites are upscaled in 3D mode only: the original renderer stays pixel-faithful */
+    int scale = world3d_enabled() ? upscale_factor() : 1;
+    if (t->gpu >= 0 && t->pal == pal && t->rev == rev && t->pal_hash == ph && t->pixels == pixels && t->scale == scale)
         return t->gpu;
 
     static uint32_t rgba[256 * 256];
@@ -114,8 +118,12 @@ static int texture_for(uint32_t rec)
             rgba[y * w + x] = (c & 0x00FFFFFFu) | (idx ? 0xFF000000u : 0u);
         }
     }
-    if (t->gpu < 0) t->gpu = render_texture_create((int)w, (int)h);
-    render_texture_upload(t->gpu, (int)w, (int)h, rgba);
+    uint32_t *up = scale > 1 ? upscale_pixels(rgba, (int)w, (int)h, scale) : NULL;
+    int uw = up ? (int)w * scale : (int)w, uh = up ? (int)h * scale : (int)h;
+    if (t->gpu < 0) t->gpu = render_texture_create(uw, uh);
+    render_texture_upload(t->gpu, uw, uh, up ? up : rgba);
+    free(up);
+    t->scale = scale;
     t->pal = pal;
     t->rev = rev;
     t->pal_hash = ph;
@@ -246,9 +254,43 @@ static void dump_prim(uint32_t flags, uint32_t rec, uint32_t verts, unsigned n, 
 
 /* Map primitives (tiles, partial-block triangles) carry the world position of
  * each vertex at +0x80: feed the 3D camera fit, and in 3D mode don't draw them. */
+static unsigned g_probe_frame = 0xFFFFFFFFu; /* F10: log map primitives of one frame */
+void d3ddll_probe_next_frame(void) { g_probe_frame = g_frame + 1; rt_log("PROBE: frame %u", g_probe_frame); }
+
+static void probe_prim(uint32_t verts, unsigned n, uint32_t flags, uint32_t rec, uint8_t shade)
+{
+    float w[4][3], sv[4][2];
+    for (unsigned i = 0; i < n; i++) {
+        memcpy(w[i], GPTR(verts + 0x80u + 32u * i), 12);
+        memcpy(sv[i], GPTR(verts + 32u * i), 8);
+    }
+    char line[512];
+    int k = snprintf(line, sizeof line, "PRIM n=%u f=%05X tex=%ux%u sh=%u |", n, flags, rec ? MEM16(rec + 0x0E) : 0,
+                     rec ? MEM16(rec + 0x10) : 0, shade);
+    for (unsigned i = 0; i < n; i++)
+        k += snprintf(line + k, sizeof line - (size_t)k, " w(%.2f,%.2f,%.2f) s(%.0f,%.0f)", w[i][0], w[i][1], w[i][2], sv[i][0], sv[i][1]);
+    WorldMap wm;
+    if (world_map_live(&wm)) {
+        float cx = 0, cy = 0, cz = 0;
+        for (unsigned i = 0; i < n; i++) { cx += w[i][0]; cy += w[i][1]; cz += w[i][2]; }
+        cx /= (float)n; cy /= (float)n; cz /= (float)n;
+        for (int z = (int)floorf(cz) - 1; z <= (int)floorf(cz); z++) {
+            const GBlock *b = world_map_block(&wm, (int)floorf(cx), (int)floorf(cy), z);
+            if (b)
+                k += snprintf(line + k, sizeof line - (size_t)k, " | blk(%d,%d,%d) slope=%u L%04X R%04X T%04X B%04X lid%04X",
+                              (int)floorf(cx), (int)floorf(cy), z, b->slope >> 2, b->left, b->right, b->top, b->bottom, b->lid);
+        }
+    }
+    rt_log("%s", line);
+}
+
+static uint32_t g_cur_flags, g_cur_rec;
+static uint8_t g_cur_shade;
+
 static int map_prim(uint32_t verts, unsigned n)
 {
     g_map_ambient = g_ambient;
+    if (g_frame == g_probe_frame) probe_prim(verts, n, g_cur_flags, g_cur_rec, g_cur_shade);
     for (unsigned i = 0; i < n; i++) {
         float sv[3], wv[3];
         memcpy(sv, GPTR(verts + 32u * i), 12);
@@ -357,6 +399,7 @@ static void gbh_DrawTile(void)
     g_draw_kind = "tile";
     g_draw_ret = MEM32(g_esp);
     if (ARG(2)) tile_uvs(ARG(0), ARG(2));
+    g_cur_flags = ARG(0); g_cur_rec = ARG(1); g_cur_shade = (uint8_t)ARG(3);
     if (!(ARG(2) && map_prim(ARG(2), 4))) emit(ARG(0), ARG(1), ARG(2), 4, (uint8_t)ARG(3));
     RETURN_STDCALL(0, 4);
 }
@@ -365,12 +408,14 @@ static void gbh_DrawTilePart(void)
 {
     g_draw_kind = "tilep";
     if (ARG(2)) tile_uvs(ARG(0), ARG(2));
+    g_cur_flags = ARG(0); g_cur_rec = ARG(1); g_cur_shade = (uint8_t)ARG(3);
     if (!(ARG(2) && map_prim(ARG(2), 4))) emit(ARG(0), ARG(1), ARG(2), 4, (uint8_t)ARG(3));
     RETURN_STDCALL(0, 4);
 }
 static void gbh_DrawTriangle(void)
 {
     g_draw_kind = "tri";
+    g_cur_flags = ARG(0); g_cur_rec = ARG(1); g_cur_shade = (uint8_t)ARG(3);
     if (!(ARG(2) && map_prim(ARG(2), 3))) emit(ARG(0), ARG(1), ARG(2), 3, (uint8_t)ARG(3));
     RETURN_STDCALL(0, 4);
 }

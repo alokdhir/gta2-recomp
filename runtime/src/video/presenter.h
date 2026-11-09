@@ -30,3 +30,6 @@ int presenter_width(void);
 int presenter_height(void);
 void presenter_set_gamma(float r, float g, float b);
 void presenter_shutdown(void);
+
+/* Capture ab_original.png and ab_3d.png (into $GTA2_AB_DIR or the game dir) from the next frames. */
+void presenter_request_ab(void);

@@ -346,10 +346,16 @@ static void build_block(int x, int y, int z, const GBlock *b)
 
     ramp_heights(st, h); /* leaves 1,1,1,1 for ordinary blocks */
     push_lid(X, Y, Z, cell, 4, h, b->lid);
-    /* Opposite sides. A flat (see-through) side is a single two-sided quad at
-     * its own edge; the opposite side's tile is what its back shows, not a
-     * second face (matches the original: one fence, not two). */
-    if (FACE_FLAT(b->left))
+    /* Opposite sides. A flat (see-through) side opposite a normal one is a
+     * single two-sided quad at its own edge, the opposite tile showing on its
+     * back (one fence, not two); two flat sides are two panels. Both rules
+     * checked against the original's draw stream. */
+    if (FACE_FLAT(b->left) && FACE_FLAT(b->right)) {
+        /* both sides see-through: the original draws a panel at each edge
+         * (e.g. the two planes that make a lamp post's arm) */
+        push_wall(X, Y1, X, Y, Z, h[3], h[0], b->left, SH_LEFT);
+        push_wall(X1, Y, X1, Y1, Z, h[1], h[2], b->right, SH_RIGHT);
+    } else if (FACE_FLAT(b->left))
         push_wall_2s(X, Y1, X, Y, Z, h[3], h[0], b->left, b->right, SH_LEFT);
     else if (FACE_FLAT(b->right))
         push_wall_2s(X1, Y, X1, Y1, Z, h[1], h[2], b->right, b->left, SH_RIGHT);
@@ -357,7 +363,10 @@ static void build_block(int x, int y, int z, const GBlock *b)
         push_wall(X, Y1, X, Y, Z, h[3], h[0], b->left, SH_LEFT);      /* SW -> NW */
         push_wall(X1, Y, X1, Y1, Z, h[1], h[2], b->right, SH_RIGHT);  /* NE -> SE */
     }
-    if (FACE_FLAT(b->top))
+    if (FACE_FLAT(b->top) && FACE_FLAT(b->bottom)) {
+        push_wall(X, Y, X1, Y, Z, h[0], h[1], b->top, SH_TOP);
+        push_wall(X1, Y1, X, Y1, Z, h[2], h[3], b->bottom, SH_BOTTOM);
+    } else if (FACE_FLAT(b->top))
         push_wall_2s(X, Y, X1, Y, Z, h[0], h[1], b->top, b->bottom, SH_TOP);
     else if (FACE_FLAT(b->bottom))
         push_wall_2s(X1, Y1, X, Y1, Z, h[2], h[3], b->bottom, b->top, SH_BOTTOM);
@@ -563,6 +572,32 @@ static int ensure_tiles(void)
     return 1;
 }
 
+/* GTA2_DEBUG_BLOCKS="x,y,z;x,y,z": log what the mesh builder emits for those blocks */
+static void debug_blocks(const WorldMap *m)
+{
+    static int done;
+    const char *e = getenv("GTA2_DEBUG_BLOCKS");
+    if (done || !e) return;
+    done = 1;
+    char *copy = strdup(e), *save = NULL;
+    for (char *t = strtok_r(copy, ";", &save); t; t = strtok_r(NULL, ";", &save)) {
+        int x, y, z;
+        if (sscanf(t, "%d,%d,%d", &x, &y, &z) != 3) continue;
+        const GBlock *b = world_map_block(m, x, y, z);
+        if (!b) { rt_log("dbg block %d,%d,%d: empty", x, y, z); continue; }
+        int before = g_nmesh;
+        build_block(x, y, z, b);
+        rt_log("dbg block %d,%d,%d slope=%u lid=%04X L%04X R%04X T%04X B%04X -> %d verts", x, y, z, b->slope >> 2,
+               b->lid, b->left, b->right, b->top, b->bottom, g_nmesh - before);
+        for (int i = before; i < g_nmesh; i += 3)
+            rt_log("   tri (%.2f,%.2f,%.2f) (%.2f,%.2f,%.2f) (%.2f,%.2f,%.2f) tile %.0f back %.0f", g_mesh[i].x, g_mesh[i].y,
+                   g_mesh[i].z, g_mesh[i + 1].x, g_mesh[i + 1].y, g_mesh[i + 1].z, g_mesh[i + 2].x, g_mesh[i + 2].y,
+                   g_mesh[i + 2].z, g_mesh[i].layer, g_mesh[i].layer2);
+        g_nmesh = before;
+    }
+    free(copy);
+}
+
 void world3d_draw(id<MTLRenderCommandEncoder> enc, const float fit[4])
 {
     static int env;
@@ -570,6 +605,7 @@ void world3d_draw(id<MTLRenderCommandEncoder> enc, const float fit[4])
     if (!world3d_enabled() || !g_cam.valid || !setup() || !ensure_tiles()) return;
     WorldMap m;
     if (!world_map_live(&m)) return;
+    debug_blocks(&m);
 
     /* Region: what the camera sees at ground level and below, plus a margin
      * for buildings leaning into view. */

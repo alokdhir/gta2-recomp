@@ -17,6 +17,8 @@
 #include "input/dinput.h"
 #include "input/gamepad.h"
 #include "render3d/world3d.h"
+#include "video/presenter.h"
+void d3ddll_probe_next_frame(void);
 #include "platform/keymap.h"
 #include "win32/imports.h"
 #include "win32/user32_api.h"
@@ -138,6 +140,12 @@ static void key_transition(uint32_t hwnd, unsigned mac_keycode, int down, int re
 {
     uint8_t vk, dik;
     if (!keymap_from_mac(mac_keycode, &vk, &dik)) return;
+    if (vk == 0x79 /* F10: probe */ && down && !repeat) {
+        world3d_set(0);              /* the probe reads the original renderer's stream */
+        d3ddll_probe_next_frame();
+        presenter_request_ab();
+        user32_update_title();
+    }
     if (vk == 0x78 /* F9 */ && down && !repeat) {
         world3d_toggle();
         user32_update_title();
@@ -181,7 +189,7 @@ static int mac_code_for(const char *name)
     static const struct { const char *n; int c; } named[] = {
         { "return", 0x24 }, { "enter", 0x24 }, { "escape", 0x35 }, { "esc", 0x35 }, { "space", 0x31 },
         { "up", 0x7E }, { "down", 0x7D }, { "left", 0x7B }, { "right", 0x7C }, { "tab", 0x30 },
-        { "ctrl", 0x3B }, { "shift", 0x38 }, { "alt", 0x3A },
+        { "ctrl", 0x3B }, { "shift", 0x38 }, { "alt", 0x3A }, { "f9", 0x65 }, { "f10", 0x6D },
     };
     for (size_t i = 0; i < sizeof named / sizeof *named; i++)
         if (!strcasecmp(name, named[i].n)) return named[i].c;

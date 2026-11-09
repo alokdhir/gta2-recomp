@@ -18,6 +18,8 @@ static id<MTLTexture> g_depth; /* depth buffer for the 3D world, sized to the dr
 static CAMetalLayer *g_layer;
 static int g_w, g_h;
 static unsigned g_frame_no;
+static volatile int g_ab_request;
+void presenter_request_ab(void) { g_ab_request = 1; }
 static const char *g_capture_path;
 static unsigned g_capture_frame;
 
@@ -179,6 +181,11 @@ void presenter_frame(const void *fb, uint32_t pitch, PresenterSceneFn scene, voi
         /* GTA2_AB=n: frame n with the original renderer, frame n+2 in 3D, same run */
         static int ab = -2;
         if (ab == -2) ab = getenv("GTA2_AB") ? atoi(getenv("GTA2_AB")) : -1;
+        if (g_ab_request) { /* F10: capture original (next frame) then 3D */
+            g_ab_request = 0;
+            ab = (int)g_frame_no + 2;
+            g_layer.framebufferOnly = NO;
+        }
         const char *ab_path = NULL;
         if (!g_capture_path) g_frame_no++;
         if (ab > 0 && (int)g_frame_no == ab - 1) world3d_set(0);
