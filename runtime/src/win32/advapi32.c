@@ -9,6 +9,7 @@
  */
 #include <CoreFoundation/CoreFoundation.h>
 #include <ctype.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -293,3 +294,34 @@ const NativeExport g_advapi32_exports[] = {
     { "GetUserNameA", GetUserNameA },
     { NULL, NULL },
 };
+
+/* Native access for our own settings UI. key is relative to
+ * Software\DMA Design Ltd\GTA2 (e.g. "screen"). */
+uint32_t reg_get_dword(const char *key, const char *name, uint32_t def)
+{
+    reg_init();
+    char path[256];
+    snprintf(path, sizeof path, "software\\dma design ltd\\gta2\\%s", key);
+    CFMutableDictionaryRef d = key_dict(path, 0);
+    CFStringRef n = cfstr(name);
+    CFTypeRef v = d ? CFDictionaryGetValue(d, n) : NULL;
+    CFRelease(n);
+    int32_t x = (int32_t)def;
+    if (v && CFGetTypeID(v) == CFNumberGetTypeID()) CFNumberGetValue(v, kCFNumberSInt32Type, &x);
+    return (uint32_t)x;
+}
+
+void reg_set_dword(const char *key, const char *name, uint32_t value)
+{
+    reg_init();
+    char path[256];
+    snprintf(path, sizeof path, "software\\dma design ltd\\gta2\\%s", key);
+    CFMutableDictionaryRef d = key_dict(path, 1);
+    CFStringRef n = cfstr(name);
+    int32_t x = (int32_t)value;
+    CFNumberRef v = CFNumberCreate(NULL, kCFNumberSInt32Type, &x);
+    CFDictionarySetValue(d, n, v);
+    CFRelease(v);
+    CFRelease(n);
+    reg_save();
+}

@@ -9,6 +9,7 @@
 #import <AppKit/AppKit.h>
 #import <QuartzCore/CAMetalLayer.h>
 #include <ctype.h>
+#include <math.h>
 #include <mach/mach_time.h>
 
 #include "guest_call.h"
@@ -144,6 +145,12 @@ static void key_transition(uint32_t hwnd, unsigned mac_keycode, int down, int re
 static void key_event(NSEvent *e, int down)
 {
     uint32_t hwnd = ((GTA2View *)e.window.contentView).hwnd;
+    /* isARepeat and characters are only valid for key-down/up events: AppKit
+     * throws for flagsChanged (modifier keys), which crashed the game on Ctrl. */
+    if (e.type == NSEventTypeFlagsChanged) {
+        key_transition(hwnd, e.keyCode, down, 0, nil);
+        return;
+    }
     key_transition(hwnd, e.keyCode, down, down && e.isARepeat, down ? e.characters : nil);
 }
 
@@ -331,9 +338,14 @@ void user32_set_client_size(uint32_t hwnd, int width, int height)
     w->w = width;
     w->h = height;
     NSWindow *win = (__bridge NSWindow *)w->window;
+    win.contentAspectRatio = NSMakeSize(width, height);
     if (!(win.styleMask & NSWindowStyleMaskFullScreen)) {
-        [win setContentSize:NSMakeSize(width, height)];
+        /* fit on screen, keeping the aspect ratio */
+        NSRect vis = win.screen ? win.screen.visibleFrame : NSScreen.mainScreen.visibleFrame;
+        double k = fmin(1.0, fmin((vis.size.width - 40) / width, (vis.size.height - 60) / height));
+        [win setContentSize:NSMakeSize(width * k, height * k)];
         [win center];
+        if (reg_get_dword("screen", "mac_fullscreen", 0) && width > 640) [win toggleFullScreen:nil];
     }
 }
 
@@ -771,7 +783,73 @@ static void wsprintfA(void)
     RETURN_CDECL(n);
 }
 
+
+/* ---- settings (replaces GTA2 Manager) ----------------------------------------
+ * In v9.6 the main menu's OPTIONS launches the separate GTA2 Manager program
+ * and the game quits. We show a native settings dialog instead, save to the
+ * registry, and relaunch the app with the new settings. */
+
+static const struct { int w, h; } g_res[] = {
+    { 640, 480 }, { 800, 600 }, { 1024, 768 }, { 1280, 720 }, { 1600, 900 }, { 1920, 1080 }, { 2560, 1440 },
+};
+
+static int show_settings(void)
+{
+    user32_init();
+    int cur_w = (int)reg_get_dword("screen", "window_width", 640);
+    int cur_h = (int)reg_get_dword("screen", "window_height", 480);
+    @autoreleasepool {
+        NSAlert *a = [NSAlert new];
+        a.messageText = @"GTA2 Settings";
+        a.informativeText = @"Gameplay resolution (menus stay 640 × 480). The game restarts to apply.";
+        NSView *v = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 260, 58)];
+        NSPopUpButton *pop = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 30, 260, 26) pullsDown:NO];
+        for (size_t i = 0; i < sizeof g_res / sizeof *g_res; i++) {
+            NSString *t = [NSString stringWithFormat:@"%d × %d%@", g_res[i].w, g_res[i].h,
+                           g_res[i].w * 3 == g_res[i].h * 4 ? @"" : @"  (widescreen)"];
+            [pop addItemWithTitle:t];
+            if (g_res[i].w == cur_w && g_res[i].h == cur_h) [pop selectItemAtIndex:(NSInteger)i];
+        }
+        NSButton *fs = [NSButton checkboxWithTitle:@"Full screen" target:nil action:nil];
+        fs.frame = NSMakeRect(0, 0, 260, 22);
+        fs.state = reg_get_dword("screen", "mac_fullscreen", 0) ? NSControlStateValueOn : NSControlStateValueOff;
+        [v addSubview:pop];
+        [v addSubview:fs];
+        a.accessoryView = v;
+        [a addButtonWithTitle:@"Apply & Restart"];
+        [a addButtonWithTitle:@"Cancel"];
+        if ([a runModal] != NSAlertFirstButtonReturn) return 0;
+        NSInteger i = pop.indexOfSelectedItem;
+        reg_set_dword("screen", "window_width", (uint32_t)g_res[i].w);
+        reg_set_dword("screen", "window_height", (uint32_t)g_res[i].h);
+        reg_set_dword("screen", "full_width", (uint32_t)g_res[i].w);
+        reg_set_dword("screen", "full_height", (uint32_t)g_res[i].h);
+        reg_set_dword("screen", "mac_fullscreen", fs.state == NSControlStateValueOn);
+        rt_log("settings: %dx%d fullscreen %d", g_res[i].w, g_res[i].h, fs.state == NSControlStateValueOn);
+    }
+    return 1;
+}
+
+/* ShellExecuteA(hwnd, verb, file, params, dir, show) -> > 32 on success */
+static void ShellExecuteA(void)
+{
+    const char *file = ARG(2) ? GSTR(ARG(2)) : "";
+    if (!strcasecmp(file, "GTA2 Manager.EXE")) {
+        if (show_settings()) {
+            app_request_relaunch();
+            RETURN_STDCALL(42, 6);
+        }
+        /* Cancelled: the game still quits after a "successful" launch, so
+         * relaunch unchanged rather than leaving the user at the desktop. */
+        app_request_relaunch();
+        RETURN_STDCALL(42, 6);
+    }
+    rt_log("ShellExecuteA(%s): not supported", file);
+    RETURN_STDCALL(2, 6);
+}
+
 const NativeExport g_user32_exports[] = {
+    { "ShellExecuteA", ShellExecuteA },
     { "RegisterClassA", RegisterClassA },
     { "CreateWindowExA", CreateWindowExA },
     { "ShowWindow", ShowWindow },

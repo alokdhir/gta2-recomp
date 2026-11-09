@@ -30,3 +30,11 @@ void win32_set_last_error(uint32_t e);
 /* Map a guest Windows path to a host path under the game dir. Returns a
  * malloc'd string; resolves each component case-insensitively. */
 char *win32_host_path(const char *winpath);
+
+/* Registry access for native code; key is relative to Software\DMA Design Ltd\GTA2. */
+uint32_t reg_get_dword(const char *key, const char *name, uint32_t def);
+void reg_set_dword(const char *key, const char *name, uint32_t value);
+
+/* Restart the app when the game exits (after the settings dialog). */
+void app_request_relaunch(void);
+void app_exit_hook(void);

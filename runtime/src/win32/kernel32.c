@@ -94,6 +94,7 @@ static void GetCurrentThreadId(void) { RETURN_STDCALL(0x1004, 0); }
 static void ExitProcess(void)
 {
     rt_log("ExitProcess(%u)", ARG(0));
+    app_exit_hook();
     exit((int)ARG(0));
 }
 

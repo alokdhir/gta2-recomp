@@ -50,6 +50,21 @@ static void on_fault(int sig, siginfo_t *si, void *uc)
  * (Contents/Resources/game_files); beside the .app or the binary (also one
  * and two levels up, so build/gta2 and build/GTA2.app find the repository's
  * game_files/); the current directory. */
+static int g_relaunch;
+void app_request_relaunch(void) { g_relaunch = 1; }
+
+/* Called from ExitProcess: restart ourselves if the settings dialog asked. */
+void app_exit_hook(void)
+{
+    if (!g_relaunch) return;
+    char exe[PATH_MAX];
+    uint32_t n = sizeof exe;
+    if (_NSGetExecutablePath(exe, &n) != 0) return;
+    rt_log("relaunching %s", exe);
+    char *argv[] = { exe, NULL };
+    execv(exe, argv);
+}
+
 static const char *find_game_dir(const char *argv0)
 {
     const char *env = getenv("GTA2_GAME_DIR");

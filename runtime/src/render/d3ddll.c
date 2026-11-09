@@ -286,8 +286,8 @@ static void trace_quad(const char *what)
         rt_log("   v%d x=%.1f y=%.1f z=%.3f rhw=%.3f col=%08X u=%.2f v=%.2f", i, f[8*i], f[8*i+1], f[8*i+2], f[8*i+3],
                ((uint32_t *)f)[8*i+4], f[8*i+6], f[8*i+7]);
 }
-static void gbh_DrawQuad(void) { trace_quad("DrawQuad"); g_draw_kind = "quad"; emit(ARG(0), ARG(1), ARG(2), 4, (uint8_t)ARG(3)); RETURN_STDCALL(0, 4); }
-static void gbh_DrawQuadClipped(void) { g_draw_kind = "quadc"; emit(ARG(0), ARG(1), ARG(2), 4, (uint8_t)ARG(3)); RETURN_STDCALL(0, 5); }
+static void gbh_DrawQuad(void) { trace_quad("DrawQuad"); g_draw_kind = "quad"; g_draw_ret = MEM32(g_esp); emit(ARG(0), ARG(1), ARG(2), 4, (uint8_t)ARG(3)); RETURN_STDCALL(0, 4); }
+static void gbh_DrawQuadClipped(void) { g_draw_kind = "quadc"; g_draw_ret = MEM32(g_esp); emit(ARG(0), ARG(1), ARG(2), 4, (uint8_t)ARG(3)); RETURN_STDCALL(0, 5); }
 /* Tiles: unless flag 0x4000 is set the original renderer ignores the UVs in
  * the vertices and lays the 64x64 tile out itself -- texel corners 0.5..63.5,
  * then rotation (flags & 0x60) and flips (0x08 horizontal, 0x10 vertical).
