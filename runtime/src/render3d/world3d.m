@@ -157,9 +157,17 @@ static void push_wall(float ax, float ay, float bx, float by, float z, float ha,
     const float c[4][3] = { { ax, ay, z + ha }, { bx, by, z + hb }, { bx, by, z }, { ax, ay, z } };
     unsigned tile = FACE_TILE(face);
     if (!tile) return;
+    /* Upright, u from a (left as seen from outside) to b: what the original
+     * renderer produces for a face with no rotation or flip bits. The face's
+     * own flip and quarter turns apply on top of that. */
     float uv[4][2] = { { 0, 1 - ha }, { 1, 1 - hb }, { 1, 1 }, { 0, 1 } };
-    if (FACE_FLIP(face))
-        for (int i = 0; i < 4; i++) uv[i][0] = 1 - uv[i][0];
+    for (int i = 0; i < 4; i++) {
+        float u = uv[i][0], w = uv[i][1];
+        if (FACE_FLIP(face)) u = 1 - u;
+        for (unsigned r = 0; r < FACE_ROT(face); r++) { float t = u; u = 1 - w; w = t; }
+        uv[i][0] = u;
+        uv[i][1] = w;
+    }
     static const int idx[6] = { 0, 1, 2, 0, 2, 3 };
     for (int i = 0; i < 6; i++) push_vert(c[idx[i]], uv[idx[i]], (int)tile, shade);
 }
