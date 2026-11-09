@@ -31,6 +31,8 @@ add_executable(gta2
   runtime/src/platform/keymap.c
   runtime/src/video/dmavideo.c
   runtime/src/input/dinput.c
+  runtime/src/audio/mixer.c
+  runtime/src/audio/miles.c
   runtime/src/video/presenter.m
   runtime/src/render/d3ddll.c
   runtime/src/render/render_metal.m
@@ -43,4 +45,4 @@ set_source_files_properties(runtime/src/win32/user32.m runtime/src/video/present
   PROPERTIES COMPILE_FLAGS -fobjc-arc)
 target_link_libraries(gta2 PRIVATE "-framework AppKit" "-framework QuartzCore" "-framework Metal"
   "-framework CoreFoundation" "-framework ImageIO" "-framework UniformTypeIdentifiers"
-  "-framework CoreGraphics")
+  "-framework CoreGraphics" "-framework AudioToolbox")

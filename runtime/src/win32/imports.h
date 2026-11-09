@@ -38,6 +38,7 @@ extern const NativeExport g_user32_exports[];
 extern const NativeExport g_advapi32_exports[];
 extern const NativeExport g_module_exports[];
 extern const NativeExport g_dinput_exports[];
+extern const NativeExport g_miles_exports[];
 extern const NativeExport g_misc_exports[];
 
 void imports_bind(void);  /* patch IAT slots and resolve native implementations */
