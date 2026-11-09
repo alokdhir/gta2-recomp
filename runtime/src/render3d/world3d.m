@@ -124,20 +124,27 @@ void world3d_begin_frame(float w, float h)
 
 typedef struct {
     float x, y, z;      /* world: tiles, tiles, levels */
-    float u, v, layer;  /* tile texture coordinates + array layer */
+    float u, v, layer;  /* tile texture coordinates + array layer (front side) */
     float shade;
+    float u2, v2, layer2; /* what the back of the face shows (flat faces) */
 } WVert;
 
 static WVert *g_mesh;
 static int g_nmesh, g_capmesh;
 
-static void push_vert(const float p[3], const float uv[2], int tile, float shade)
+static void push_vert2(const float p[3], const float uv[2], int tile, float shade, const float uv2[2], int tile2)
 {
     if (g_nmesh == g_capmesh) {
         g_capmesh = g_capmesh ? g_capmesh * 2 : 65536;
         g_mesh = realloc(g_mesh, sizeof *g_mesh * (size_t)g_capmesh);
     }
-    g_mesh[g_nmesh++] = (WVert){ p[0], p[1], p[2], uv[0], uv[1], (float)tile, shade };
+    g_mesh[g_nmesh++] = (WVert){ p[0], p[1], p[2], uv[0], uv[1], (float)tile, shade, uv2[0], uv2[1], (float)tile2 };
+}
+
+/* Most faces show the same texture from both sides (the back just mirrors). */
+static void push_vert(const float p[3], const float uv[2], int tile, float shade)
+{
+    push_vert2(p, uv, tile, shade, uv, tile);
 }
 
 /* Directional shading, close to the game's own per-face shades */
@@ -151,25 +158,53 @@ static void push_vert(const float p[3], const float uv[2], int tile, float shade
 /* A wall between two footprint points a -> b (seen from outside, a on the
  * left), from the block floor up to the lid heights ha/hb (fractions of a
  * level). The texture is trimmed at the top for a sloped edge. */
-static void push_wall(float ax, float ay, float bx, float by, float z, float ha, float hb, uint16_t face, float shade)
+static void wall_uv(uint16_t face, float ha, float hb, float uv[4][2])
 {
-    if (ha <= 0.001f && hb <= 0.001f) return;
-    const float c[4][3] = { { ax, ay, z + ha }, { bx, by, z + hb }, { bx, by, z }, { ax, ay, z } };
-    unsigned tile = FACE_TILE(face);
-    if (!tile) return;
     /* Upright, u from a (left as seen from outside) to b: what the original
      * renderer produces for a face with no rotation or flip bits. The face's
      * own flip and quarter turns apply on top of that. */
-    float uv[4][2] = { { 0, 1 - ha }, { 1, 1 - hb }, { 1, 1 }, { 0, 1 } };
+    const float base[4][2] = { { 0, 1 - ha }, { 1, 1 - hb }, { 1, 1 }, { 0, 1 } };
     for (int i = 0; i < 4; i++) {
-        float u = uv[i][0], w = uv[i][1];
+        float u = base[i][0], w = base[i][1];
         if (FACE_FLIP(face)) u = 1 - u;
         for (unsigned r = 0; r < FACE_ROT(face); r++) { float t = u; u = 1 - w; w = t; }
         uv[i][0] = u;
         uv[i][1] = w;
     }
+}
+
+/* A wall between two footprint points a -> b (seen from outside, a on the
+ * left), from the block floor up to the lid heights ha/hb (fractions of a
+ * level). `back`, if it has a tile, is what the reverse side shows (GTA2's
+ * flat faces); otherwise the back is the front seen through. */
+static void push_wall_2s(float ax, float ay, float bx, float by, float z, float ha, float hb, uint16_t face,
+                         uint16_t back, float shade)
+{
+    if (ha <= 0.001f && hb <= 0.001f) return;
+    unsigned tile = FACE_TILE(face);
+    if (!tile) return;
+    const float c[4][3] = { { ax, ay, z + ha }, { bx, by, z + hb }, { bx, by, z }, { ax, ay, z } };
+    float uv[4][2], uv2[4][2];
+    wall_uv(face, ha, hb, uv);
+    unsigned tile2 = tile;
+    if (FACE_TILE(back)) {
+        /* seen from behind, b is on the left: mirror, then the back face's own bits */
+        wall_uv(back, hb, ha, uv2);
+        for (int i = 0; i < 4; i++) uv2[i][0] = 1 - uv2[i][0];
+        float t[2];
+        memcpy(t, uv2[0], 8); memcpy(uv2[0], uv2[1], 8); memcpy(uv2[1], t, 8);
+        memcpy(t, uv2[2], 8); memcpy(uv2[2], uv2[3], 8); memcpy(uv2[3], t, 8);
+        tile2 = FACE_TILE(back);
+    } else {
+        memcpy(uv2, uv, sizeof uv);
+    }
     static const int idx[6] = { 0, 1, 2, 0, 2, 3 };
-    for (int i = 0; i < 6; i++) push_vert(c[idx[i]], uv[idx[i]], (int)tile, shade);
+    for (int i = 0; i < 6; i++) push_vert2(c[idx[i]], uv[idx[i]], (int)tile, shade, uv2[idx[i]], (int)tile2);
+}
+
+static void push_wall(float ax, float ay, float bx, float by, float z, float ha, float hb, uint16_t face, float shade)
+{
+    push_wall_2s(ax, ay, bx, by, z, ha, hb, face, 0, shade);
 }
 
 /* Lid over a footprint polygon (up to 4 points, corners of the unit cell in
@@ -309,10 +344,25 @@ static void build_block(int x, int y, int z, const GBlock *b)
 
     ramp_heights(st, h); /* leaves 1,1,1,1 for ordinary blocks */
     push_lid(X, Y, Z, cell, 4, h, b->lid);
-    push_wall(X, Y1, X, Y, Z, h[3], h[0], b->left, SH_LEFT);      /* SW -> NW */
-    push_wall(X1, Y, X1, Y1, Z, h[1], h[2], b->right, SH_RIGHT);  /* NE -> SE */
-    push_wall(X, Y, X1, Y, Z, h[0], h[1], b->top, SH_TOP);        /* NW -> NE */
-    push_wall(X1, Y1, X, Y1, Z, h[2], h[3], b->bottom, SH_BOTTOM);/* SE -> SW */
+    /* Opposite sides. A flat (see-through) side is a single two-sided quad at
+     * its own edge; the opposite side's tile is what its back shows, not a
+     * second face (matches the original: one fence, not two). */
+    if (FACE_FLAT(b->left))
+        push_wall_2s(X, Y1, X, Y, Z, h[3], h[0], b->left, b->right, SH_LEFT);
+    else if (FACE_FLAT(b->right))
+        push_wall_2s(X1, Y, X1, Y1, Z, h[1], h[2], b->right, b->left, SH_RIGHT);
+    else {
+        push_wall(X, Y1, X, Y, Z, h[3], h[0], b->left, SH_LEFT);      /* SW -> NW */
+        push_wall(X1, Y, X1, Y1, Z, h[1], h[2], b->right, SH_RIGHT);  /* NE -> SE */
+    }
+    if (FACE_FLAT(b->top))
+        push_wall_2s(X, Y, X1, Y, Z, h[0], h[1], b->top, b->bottom, SH_TOP);
+    else if (FACE_FLAT(b->bottom))
+        push_wall_2s(X1, Y1, X, Y1, Z, h[2], h[3], b->bottom, b->top, SH_BOTTOM);
+    else {
+        push_wall(X, Y, X1, Y, Z, h[0], h[1], b->top, SH_TOP);        /* NW -> NE */
+        push_wall(X1, Y1, X, Y1, Z, h[2], h[3], b->bottom, SH_BOTTOM);/* SE -> SW */
+    }
 }
 
 static void build_mesh(const WorldMap *m, int x0, int y0, int x1, int y1)
@@ -337,11 +387,12 @@ static char g_tiles_for[1024];
 static NSString *const kShaders =
     @"#include <metal_stdlib>\n"
      "using namespace metal;\n"
-     "struct WVert { packed_float3 p; packed_float2 uv; float layer; float shade; };\n"
+     "struct WVert { packed_float3 p; packed_float2 uv; float layer; float shade; packed_float2 uv2; float layer2; };\n"
      "struct Cam { float4 fit; float2 screen; float2 centre; packed_float3 cam; float f; float near_d; float far_d;\n"
      "             float ambient; int nlights; };\n"
      "struct Light { packed_float3 p; float radius; float radius2; float intensity; packed_float3 rgb; };\n"
-     "struct VOut { float4 pos [[position]]; float2 uv; float layer [[flat]]; float shade; float3 world; };\n"
+     "struct VOut { float4 pos [[position]]; float2 uv; float layer [[flat]]; float shade; float3 world;\n"
+     "              float2 uv2; float layer2 [[flat]]; };\n"
      "vertex VOut w_vs(uint vid [[vertex_id]], const device WVert *v [[buffer(0)]], constant Cam &c [[buffer(1)]]) {\n"
      "    WVert in = v[vid];\n"
      "    float3 p = float3(in.p);\n"
@@ -357,14 +408,16 @@ static NSString *const kShaders =
      "    o.layer = in.layer;\n"
      "    o.shade = in.shade;\n"
      "    o.world = p;\n"
+     "    o.uv2 = float2(in.uv2);\n"
+     "    o.layer2 = in.layer2;\n"
      "    return o;\n"
      "}\n"
      /* Lighting, per pixel, following the original renderer's rule: at full
       * ambient (daylight) only the face's directional shade applies; below
       * it, ambient + shade^2 * sum(light falloff * intensity * colour). */
-     "fragment float4 w_fs(VOut in [[stage_in]], texture2d_array<float> t [[texture(0)]], sampler s [[sampler(0)]],\n"
-     "                     constant Cam &c [[buffer(1)]], const device Light *lights [[buffer(2)]]) {\n"
-     "    float4 tex = t.sample(s, in.uv, uint(in.layer));\n"
+     "fragment float4 w_fs(VOut in [[stage_in]], bool front [[front_facing]], texture2d_array<float> t [[texture(0)]],\n"
+     "                     sampler s [[sampler(0)]], constant Cam &c [[buffer(1)]], const device Light *lights [[buffer(2)]]) {\n"
+     "    float4 tex = front ? t.sample(s, in.uv, uint(in.layer)) : t.sample(s, in.uv2, uint(in.layer2));\n"
      "    if (tex.a < 0.5) discard_fragment();\n"
      "    if (c.ambient >= 255.0) return float4(tex.rgb * in.shade, 1);\n"
      "    float3 sum = float3(0);\n"
