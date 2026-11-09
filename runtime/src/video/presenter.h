@@ -22,6 +22,11 @@ void presenter_frame(const void *fb, uint32_t pitch, PresenterSceneFn scene, voi
 
 /* NDC rectangle (x0, y0, x1, y1) the game's screen maps to this frame (letterboxed). */
 void presenter_fit_rect(float out[4]);
+/* Which part of the frame the scene callback is drawing: PHASE_ALL (no
+ * bloom), or PHASE_WORLD (offscreen, bloomed) then PHASE_OVERLAY (HUD etc.,
+ * straight onto the final image). */
+enum { PHASE_ALL = 0, PHASE_WORLD = 1, PHASE_OVERLAY = 2 };
+int presenter_phase(void);
 #ifdef __OBJC__
 id<MTLDevice> presenter_device(void);
 #endif

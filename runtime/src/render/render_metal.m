@@ -189,7 +189,9 @@ static void draw_scene(id<MTLRenderCommandEncoder> enc, void *ctx)
     (void)ctx;
     struct { float fit[4]; float screen[2]; float pad[2]; } u;
     presenter_fit_rect(u.fit);
-    world3d_draw(enc, u.fit);
+    int phase = presenter_phase();
+    if (phase != PHASE_OVERLAY) world3d_draw(enc, u.fit);
+    if (phase == PHASE_WORLD) return; /* the 2D batches (HUD) draw after bloom */
     [enc setDepthStencilState:g_nodepth];
     if (!g_nbatches) return;
     u.screen[0] = g_screen[0];
