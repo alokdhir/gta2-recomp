@@ -21,14 +21,21 @@ Sprites (cars) are captured from the running game instead, so every colour
 remap and damage state the game produces is covered:
 
   GTA2_DUMP_SPRITES=<dump_dir> GTA2.app ...   (drive around)
-  texpack.py sprites-prep <dump_dir>/<style> <work_dir> [--all] [--pack <pack_dir>]
+  texpack.py sprites-prep <dump_dir>/<style> <work_dir> [--all] [--pack <pack_dir>] [--double]
       picks car-sized sprites (people are too small to gain from AI upscaling;
       --all takes every sprite in the folder, for a hand-picked set of objects),
       pads them and bleeds colour into the transparent area. --pack skips
       sprites the pack already has.
   realesrgan-ncnn-vulkan -i <work_dir>/in -o <work_dir>/out -n realesrgan-x4plus-anime -s 4
+  texpack.py sprites-masks <work_dir>                       (optional)
+  realesrgan-ncnn-vulkan -i <work_dir>/mask_in -o <work_dir>/mask_out -n realesrgan-x4plus-anime -s 4
+      upscales each sprite's outline too, so edges come out smooth instead
+      of keeping the original pixel staircase (hearts, icons).
   texpack.py sprites-finish <work_dir> <pack_dir>
-      writes <pack_dir>/sprites/<hash>.png at 4x, alpha restored.
+      writes <pack_dir>/sprites/<hash>.png at 4x, alpha restored (from
+      mask_out when present). sprites-prep --double feeds the upscaler a
+      pixel-doubled input: cleaner for small flat graphics such as the gang
+      meters, where the model otherwise invents texture.
 Needs Pillow and numpy (build-time only).
 """
 import os
@@ -127,7 +134,7 @@ def is_car(w, h):
     return max(w, h) >= 40 and min(w, h) >= 20
 
 
-def sprites_prep(dump, work, all_sizes=False, pack=None):
+def sprites_prep(dump, work, all_sizes=False, pack=None, double=False):
     os.makedirs(f'{work}/in', exist_ok=True)
     os.makedirs(f'{work}/mask', exist_ok=True)
     done = set(os.listdir(f'{work}/in'))
@@ -144,10 +151,23 @@ def sprites_prep(dump, work, all_sizes=False, pack=None):
         im = np.array(Image.open(f'{dump}/{f}').convert('RGBA'))
         mask = im[..., 3] > 0
         rgb = np.pad(bleed(im[..., :3], mask), ((PAD, PAD), (PAD, PAD), (0, 0)), mode='edge')
-        Image.fromarray(rgb).save(f'{work}/in/{h16}.png')
+        out = Image.fromarray(rgb)
+        if double:
+            out = out.resize((out.width * 2, out.height * 2), Image.NEAREST)
+        out.save(f'{work}/in/{h16}.png')
         np.save(f'{work}/mask/{h16}.npy', mask)
         n += 1
     print(f'sprites-prep: {n} new sprites in {work}/in')
+
+
+def sprites_masks(work):
+    os.makedirs(f'{work}/mask_in', exist_ok=True)
+    n = 0
+    for f in sorted(os.listdir(f'{work}/mask')):
+        a = np.pad((np.load(f'{work}/mask/{f}') * 255).astype(np.uint8), PAD)
+        Image.fromarray(np.dstack([a, a, a])).save(f'{work}/mask_in/{f[:-4]}.png')
+        n += 1
+    print(f'sprites-masks: {n} masks in {work}/mask_in')
 
 
 def sprites_finish(work, pack):
@@ -161,7 +181,16 @@ def sprites_finish(work, pack):
         up = Image.open(f'{work}/out/{f}').convert('RGB')
         k = up.width // (w + 2 * PAD)
         rgb = up.crop((PAD * k, PAD * k, (PAD + w) * k, (PAD + h) * k))
-        a = Image.fromarray((mask * 255).astype(np.uint8)).resize((w * k, h * k), Image.BILINEAR)
+        if k > 4:  # --double: the model gave 8x
+            k = 4
+            rgb = rgb.resize((w * k, h * k), Image.LANCZOS)
+        mp = f'{work}/mask_out/{f}'
+        if os.path.exists(mp):  # upscaled outline
+            m = Image.open(mp).convert('L')
+            km = m.width // (w + 2 * PAD)
+            a = m.crop((PAD * km, PAD * km, (PAD + w) * km, (PAD + h) * km)).resize((w * k, h * k), Image.LANCZOS)
+        else:
+            a = Image.fromarray((mask * 255).astype(np.uint8)).resize((w * k, h * k), Image.BILINEAR)
         img = rgb.convert('RGBA')
         img.putalpha(a.point(lambda v: 255 if v >= 128 else 0))
         img.save(f'{pack}/sprites/{f}')
@@ -174,7 +203,9 @@ if __name__ == '__main__':
         prep(sys.argv[2], sys.argv[3])
     elif len(sys.argv) >= 4 and sys.argv[1] == 'sprites-prep':
         pk = sys.argv[sys.argv.index('--pack') + 1] if '--pack' in sys.argv else None
-        sprites_prep(sys.argv[2], sys.argv[3], '--all' in sys.argv, pk)
+        sprites_prep(sys.argv[2], sys.argv[3], '--all' in sys.argv, pk, '--double' in sys.argv)
+    elif len(sys.argv) >= 3 and sys.argv[1] == 'sprites-masks':
+        sprites_masks(sys.argv[2])
     elif len(sys.argv) >= 4 and sys.argv[1] == 'sprites-finish':
         sprites_finish(sys.argv[2], sys.argv[3])
     elif len(sys.argv) >= 5 and sys.argv[1] == 'finish':
