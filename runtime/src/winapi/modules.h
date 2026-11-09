@@ -1,6 +1,6 @@
 /* Native replacements for the DLLs gta2.exe loads with LoadLibraryA. */
 #pragma once
-#include "win32/imports.h"
+#include "winapi/imports.h"
 
 typedef struct {
     const char *name;

@@ -20,9 +20,9 @@
 #include "video/presenter.h"
 void d3ddll_probe_next_frame(void);
 #include "platform/keymap.h"
-#include "win32/imports.h"
-#include "win32/user32_api.h"
-#include "win32/win32.h"
+#include "winapi/imports.h"
+#include "winapi/user32_api.h"
+#include "winapi/win32.h"
 
 #define WM_CREATE 0x0001
 #define WM_DESTROY 0x0002

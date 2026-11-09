@@ -4,7 +4,7 @@
 #include "render/render.h"
 #include "video/video.h"
 #include "render3d/world3d.h"
-#include "win32/imports.h"
+#include "winapi/imports.h"
 
 #define MAX_TEXTURES 16384
 

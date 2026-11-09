@@ -21,9 +21,9 @@
 #include "guest_memory.h"
 #include "video/presenter.h"
 #include "video/video.h"
-#include "win32/imports.h"
-#include "win32/modules.h"
-#include "win32/user32_api.h"
+#include "winapi/imports.h"
+#include "winapi/modules.h"
+#include "winapi/user32_api.h"
 
 #define SV_SIZE 0x4C4u
 #define SV_FLAGS 0x04u

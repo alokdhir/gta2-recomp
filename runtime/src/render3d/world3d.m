@@ -19,8 +19,8 @@
 #include "render3d/upscale.h"
 #include "render/render.h"
 #include "video/presenter.h"
-#include "win32/imports.h"
-#include "win32/win32.h"
+#include "winapi/imports.h"
+#include "winapi/win32.h"
 
 /* ---- toggle ------------------------------------------------------------------ */
 

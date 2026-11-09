@@ -8,7 +8,7 @@
 #include <string.h>
 
 #include "recomp_types.h"
-#include "win32/imports.h"
+#include "winapi/imports.h"
 
 /* Game globals (v9.6): map holder -> map object; DMAP arrays inside it. */
 #define MAP_HOLDER_PTR 0x00662C08u

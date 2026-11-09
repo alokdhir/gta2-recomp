@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "recomp_types.h"
-#include "win32/imports.h"
+#include "winapi/imports.h"
 
 RECOMP_TLS uint32_t g_eax, g_ecx, g_edx, g_esp;
 RECOMP_TLS uint32_t g_ebx, g_esi, g_edi, g_ebp;

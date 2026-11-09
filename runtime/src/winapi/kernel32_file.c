@@ -12,8 +12,8 @@
 #include <unistd.h>
 
 #include "guest_memory.h"
-#include "win32/imports.h"
-#include "win32/win32.h"
+#include "winapi/imports.h"
+#include "winapi/win32.h"
 #include "render3d/world_data.h"
 
 /* ---- handle table --------------------------------------------------------- */

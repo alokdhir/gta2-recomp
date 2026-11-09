@@ -11,7 +11,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "win32/imports.h"
+#include "winapi/imports.h"
 
 #define MAX_VOICES 96
 #define OUT_RATE 44100.0

@@ -10,9 +10,9 @@
 #include <string.h>
 #include <strings.h>
 
-#include "win32/imports.h"
-#include "win32/modules.h"
-#include "win32/win32.h"
+#include "winapi/imports.h"
+#include "winapi/modules.h"
+#include "winapi/win32.h"
 
 /* Exports of the original DLLs; all stdcall. stack_bytes from the `ret N`
  * of each original function (provisional where marked ?). */

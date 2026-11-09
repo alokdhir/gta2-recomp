@@ -6,8 +6,8 @@
 #import <GameController/GameController.h>
 
 #include "input/gamepad.h"
-#include "win32/imports.h"
-#include "win32/user32_api.h"
+#include "winapi/imports.h"
+#include "winapi/user32_api.h"
 
 /* macOS key codes of the bound keys */
 enum {

@@ -4,7 +4,7 @@
  * at that VA: scripts/translate.sh passes this file to the recompiler with
  * --exclude-manual, which skips generating those bodies so these link instead
  * (for direct calls and the dispatch table alike). Calling convention as for a
- * native import (see win32/imports.h).
+ * native import (see winapi/imports.h).
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,7 +12,7 @@
 #include <math.h>
 #include "recomp_types.h"
 #include "video/video.h"
-#include "win32/imports.h"
+#include "winapi/imports.h"
 #include "debug/watch.h"
 
 /* 0x004031C0  GetDXVersion(DWORD *version, DWORD *platform) -- the DirectX SDK

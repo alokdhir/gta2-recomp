@@ -9,8 +9,8 @@
 #include <unistd.h>
 
 #include "guest_memory.h"
-#include "win32/imports.h"
-#include "win32/win32.h"
+#include "winapi/imports.h"
+#include "winapi/win32.h"
 
 static uint32_t g_last_error;
 void win32_set_last_error(uint32_t e) { g_last_error = e; }

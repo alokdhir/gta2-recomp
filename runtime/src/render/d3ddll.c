@@ -22,8 +22,8 @@
 #include "render3d/world_data.h"
 #include "render3d/world3d.h"
 #include "render3d/upscale.h"
-#include "win32/imports.h"
-#include "win32/modules.h"
+#include "winapi/imports.h"
+#include "winapi/modules.h"
 
 /* Texture record: +0x0E width, +0x10 height, +0x12 palette (low byte),
  * +0x13 flags, +0x14 pixels, +0x18 palette (full), +0x1A revision */

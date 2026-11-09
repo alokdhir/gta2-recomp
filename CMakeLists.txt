@@ -23,13 +23,13 @@ add_executable(gta2 MACOSX_BUNDLE
   runtime/src/cpu_state.c
   runtime/src/guest_memory.c
   runtime/src/overrides.c
-  runtime/src/win32/imports.c
-  runtime/src/win32/kernel32.c
-  runtime/src/win32/kernel32_file.c
-  runtime/src/win32/user32.m
-  runtime/src/win32/advapi32.c
-  runtime/src/win32/modules.c
-  runtime/src/win32/misc.c
+  runtime/src/winapi/imports.c
+  runtime/src/winapi/kernel32.c
+  runtime/src/winapi/kernel32_file.c
+  runtime/src/winapi/user32.m
+  runtime/src/winapi/advapi32.c
+  runtime/src/winapi/modules.c
+  runtime/src/winapi/misc.c
   runtime/src/platform/keymap.c
   runtime/src/video/dmavideo.c
   runtime/src/input/dinput.c
@@ -47,7 +47,7 @@ add_executable(gta2 MACOSX_BUNDLE
   $<TARGET_OBJECTS:gta2_game>)
 target_include_directories(gta2 PRIVATE runtime/include runtime/src ${GEN}/gen)
 target_compile_options(gta2 PRIVATE -Wall -Wextra -Wno-unused-parameter -fno-strict-aliasing)
-set_source_files_properties(runtime/src/render3d/world3d.m runtime/src/win32/user32.m runtime/src/video/presenter.m
+set_source_files_properties(runtime/src/render3d/world3d.m runtime/src/winapi/user32.m runtime/src/video/presenter.m
   runtime/src/input/gamepad.m
   runtime/src/render/render_metal.m
   PROPERTIES COMPILE_FLAGS -fobjc-arc)

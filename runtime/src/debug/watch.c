@@ -13,7 +13,7 @@
 
 #include "debug/watch.h"
 #include "recomp_types.h"
-#include "win32/imports.h"
+#include "winapi/imports.h"
 
 static uint32_t g_watch_va;
 static int g_hits, g_max_hits = 400, g_armed;

@@ -14,7 +14,7 @@
 #include "recomp_types.h"
 #include "video/video.h"
 void d3ddll_register(void);
-#include "win32/imports.h"
+#include "winapi/imports.h"
 
 recomp_func_t recomp_lookup(uint32_t va);
 int recomp_dispatch_init(void);

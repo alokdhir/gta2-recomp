@@ -8,7 +8,7 @@
 #include <unistd.h>
 
 #include "recomp_types.h"
-#include "win32/imports.h"
+#include "winapi/imports.h"
 
 ptrdiff_t g_xbox_mem_offset;
 uint32_t g_xbox_code_lo, g_xbox_code_hi;

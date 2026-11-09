@@ -15,8 +15,8 @@
 #include <sys/stat.h>
 
 #include "guest_memory.h"
-#include "win32/imports.h"
-#include "win32/win32.h"
+#include "winapi/imports.h"
+#include "winapi/win32.h"
 
 #define REG_SZ 1u
 #define REG_BINARY 3u

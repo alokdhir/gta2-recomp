@@ -1,5 +1,5 @@
 /* IAT patching, synthetic-VA dispatch and logging stubs for unimplemented imports. */
-#include "win32/imports.h"
+#include "winapi/imports.h"
 
 #include <stdlib.h>
 #include <string.h>

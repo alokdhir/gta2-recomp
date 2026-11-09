@@ -13,8 +13,8 @@
 
 #include "audio/mixer.h"
 #include "guest_memory.h"
-#include "win32/imports.h"
-#include "win32/win32.h"
+#include "winapi/imports.h"
+#include "winapi/win32.h"
 
 #define H_MAGIC 0x4D53534Bu /* 'MSSK' */
 #define H_SAMPLE 1u

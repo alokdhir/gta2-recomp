@@ -11,7 +11,7 @@
 #include "guest_memory.h"
 #include "input/dinput.h"
 #include "platform/keymap.h"
-#include "win32/imports.h"
+#include "winapi/imports.h"
 
 #define DI_OK 0u
 #define DIERR_INVALIDPARAM 0x80070057u
