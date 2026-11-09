@@ -164,6 +164,57 @@ static void push_vert(const float p[3], const float uv[2], int tile, float shade
 /* A wall between two footprint points a -> b (seen from outside, a on the
  * left), from the block floor up to the lid heights ha/hb (fractions of a
  * level). The texture is trimmed at the top for a sloped edge. */
+/* ---- ambient occlusion (baked into vertex brightness) ------------------------ */
+static const WorldMap *g_bm; /* map being meshed */
+static int g_ao = 1;          /* GTA2_NO_AO=1 to compare */
+
+/* A cell that blocks light at this level: an ordinary full block with an
+ * opaque wall (not see-through panels, slopes, partial posts or air). */
+static int solid(int x, int y, int z)
+{
+    const GBlock *b = world_map_block(g_bm, x, y, z);
+    if (!b) return 0;
+    /* only ordinary full blocks: ramps are mostly open, diagonals half, and
+     * partial blocks thin -- counting them darkened whole tiles around stairs */
+    if (b->slope >> 2) return 0;
+    uint16_t f[4] = { b->left, b->right, b->top, b->bottom };
+    for (int i = 0; i < 4; i++)
+        if (FACE_TILE(f[i]) && !FACE_FLAT(f[i])) return 1;
+    return 0;
+}
+
+/* Does the block at (x,y,z) show an opaque wall towards direction (-dx,-dy)?
+ * i.e. a wall that faces the cell we are shading. */
+static int wall_towards(int x, int y, int z, int dx, int dy)
+{
+    const GBlock *b = world_map_block(g_bm, x, y, z);
+    if (!b || (b->slope >> 2)) return 0;
+    uint16_t f = dx > 0 ? b->left : dx < 0 ? b->right : dy > 0 ? b->top : b->bottom;
+    return FACE_TILE(f) && !FACE_FLAT(f);
+}
+
+/* Brightness of a lid corner on top of block (x,y,z): walls rising beside it
+ * one level up, facing this cell (classic voxel AO). */
+static float lid_ao(int x, int y, int z, int cx, int cy)
+{
+    if (!g_ao) return 1;
+    int dx = cx ? 1 : -1, dy = cy ? 1 : -1;
+    int s1 = wall_towards(x + dx, y, z + 1, dx, 0);
+    int s2 = wall_towards(x, y + dy, z + 1, 0, dy);
+    int c = wall_towards(x + dx, y + dy, z + 1, dx, 0) || wall_towards(x + dx, y + dy, z + 1, 0, dy);
+    static const float k[4] = { 0.50f, 0.66f, 0.83f, 1.0f };
+    return k[(s1 && s2) ? 0 : 3 - (s1 + s2 + c)];
+}
+
+/* Contact shadow at the foot of a wall facing cell (fx,fy): only where that
+ * cell is open at this level and has ground just below (a wall meeting a
+ * floor), so tall buildings don't band storey by storey. */
+static float wall_foot_ao(int fx, int fy, int z)
+{
+    if (!g_ao) return 1;
+    return (!solid(fx, fy, z) && world_map_block(g_bm, fx, fy, z - 1)) ? 0.62f : 1.0f;
+}
+
 static void wall_uv(uint16_t face, float ha, float hb, float uv[4][2])
 {
     /* Upright, u from a (left as seen from outside) to b: what the original
@@ -183,8 +234,17 @@ static void wall_uv(uint16_t face, float ha, float hb, float uv[4][2])
  * left), from the block floor up to the lid heights ha/hb (fractions of a
  * level). `back`, if it has a tile, is what the reverse side shows (GTA2's
  * flat faces); otherwise the back is the front seen through. */
+static void push_wall_2s_ao(float ax, float ay, float bx, float by, float z, float ha, float hb, uint16_t face,
+                            uint16_t back, float shade, float foot);
+
 static void push_wall_2s(float ax, float ay, float bx, float by, float z, float ha, float hb, uint16_t face,
                          uint16_t back, float shade)
+{
+    push_wall_2s_ao(ax, ay, bx, by, z, ha, hb, face, back, shade, 1.0f);
+}
+
+static void push_wall_2s_ao(float ax, float ay, float bx, float by, float z, float ha, float hb, uint16_t face,
+                            uint16_t back, float shade, float foot)
 {
     if (ha <= 0.001f && hb <= 0.001f) return;
     unsigned tile = FACE_TILE(face);
@@ -205,7 +265,8 @@ static void push_wall_2s(float ax, float ay, float bx, float by, float z, float 
         memcpy(uv2, uv, sizeof uv);
     }
     static const int idx[6] = { 0, 1, 2, 0, 2, 3 };
-    for (int i = 0; i < 6; i++) push_vert2(c[idx[i]], uv[idx[i]], (int)tile, shade, uv2[idx[i]], (int)tile2);
+    for (int i = 0; i < 6; i++) /* corners 2,3 are the wall's foot */
+        push_vert2(c[idx[i]], uv[idx[i]], (int)tile, idx[i] >= 2 ? shade * foot : shade, uv2[idx[i]], (int)tile2);
 }
 
 static void push_wall(float ax, float ay, float bx, float by, float z, float ha, float hb, uint16_t face, float shade)
@@ -213,8 +274,16 @@ static void push_wall(float ax, float ay, float bx, float by, float z, float ha,
     push_wall_2s(ax, ay, bx, by, z, ha, hb, face, 0, shade);
 }
 
+static void push_wall_ao(float ax, float ay, float bx, float by, float z, float ha, float hb, uint16_t face, float shade,
+                         float foot)
+{
+    push_wall_2s_ao(ax, ay, bx, by, z, ha, hb, face, 0, shade, foot);
+}
+
 /* Lid over a footprint polygon (up to 4 points, corners of the unit cell in
  * cell-local coords), heights interpolated from the four cell corners. */
+static float g_lid_ao[4] = { 1, 1, 1, 1 }; /* NW NE SE SW brightness for the next lid */
+
 static void push_lid(float X, float Y, float z, const float (*pts)[2], int n, const float h[4], uint16_t face)
 {
     unsigned tile = FACE_TILE(face);
@@ -235,10 +304,16 @@ static void push_lid(float X, float Y, float z, const float (*pts)[2], int n, co
         uv[i][0] = u;
         uv[i][1] = w;
     }
+    float sh[4];
+    for (int i = 0; i < n; i++) { /* bilinear AO from the cell's corners */
+        float px = pts[i][0], py = pts[i][1];
+        sh[i] = SH_LID * ((1 - px) * (1 - py) * g_lid_ao[0] + px * (1 - py) * g_lid_ao[1] + px * py * g_lid_ao[2] +
+                          (1 - px) * py * g_lid_ao[3]);
+    }
     for (int i = 1; i + 1 < n; i++) {
-        push_vert(v[0], uv[0], (int)tile, SH_LID);
-        push_vert(v[i], uv[i], (int)tile, SH_LID);
-        push_vert(v[i + 1], uv[i + 1], (int)tile, SH_LID);
+        push_vert(v[0], uv[0], (int)tile, sh[0]);
+        push_vert(v[i], uv[i], (int)tile, sh[i]);
+        push_vert(v[i + 1], uv[i + 1], (int)tile, sh[i + 1]);
     }
 }
 
@@ -348,8 +423,15 @@ static void build_block(int x, int y, int z, const GBlock *b)
         return;
     }
 
-    ramp_heights(st, h); /* leaves 1,1,1,1 for ordinary blocks */
+    int ramp = ramp_heights(st, h); /* leaves 1,1,1,1 for ordinary blocks */
+    if (!ramp) {
+        g_lid_ao[0] = lid_ao(x, y, z, 0, 0);
+        g_lid_ao[1] = lid_ao(x, y, z, 1, 0);
+        g_lid_ao[2] = lid_ao(x, y, z, 1, 1);
+        g_lid_ao[3] = lid_ao(x, y, z, 0, 1);
+    }
     push_lid(X, Y, Z, cell, 4, h, b->lid);
+    g_lid_ao[0] = g_lid_ao[1] = g_lid_ao[2] = g_lid_ao[3] = 1;
     /* Opposite sides. A flat (see-through) side opposite a normal one is a
      * single two-sided quad at its own edge, the opposite tile showing on its
      * back (one fence, not two); two flat sides are two panels. Both rules
@@ -364,8 +446,8 @@ static void build_block(int x, int y, int z, const GBlock *b)
     else if (FACE_FLAT(b->right))
         push_wall_2s(X1, Y, X1, Y1, Z, h[1], h[2], b->right, b->left, SH_RIGHT);
     else {
-        push_wall(X, Y1, X, Y, Z, h[3], h[0], b->left, SH_LEFT);      /* SW -> NW */
-        push_wall(X1, Y, X1, Y1, Z, h[1], h[2], b->right, SH_RIGHT);  /* NE -> SE */
+        push_wall_ao(X, Y1, X, Y, Z, h[3], h[0], b->left, SH_LEFT, wall_foot_ao(x - 1, y, z));      /* SW -> NW */
+        push_wall_ao(X1, Y, X1, Y1, Z, h[1], h[2], b->right, SH_RIGHT, wall_foot_ao(x + 1, y, z));  /* NE -> SE */
     }
     if (FACE_FLAT(b->top) && FACE_FLAT(b->bottom)) {
         push_wall(X, Y, X1, Y, Z, h[0], h[1], b->top, SH_TOP);
@@ -375,14 +457,17 @@ static void build_block(int x, int y, int z, const GBlock *b)
     else if (FACE_FLAT(b->bottom))
         push_wall_2s(X1, Y1, X, Y1, Z, h[2], h[3], b->bottom, b->top, SH_BOTTOM);
     else {
-        push_wall(X, Y, X1, Y, Z, h[0], h[1], b->top, SH_TOP);        /* NW -> NE */
-        push_wall(X1, Y1, X, Y1, Z, h[2], h[3], b->bottom, SH_BOTTOM);/* SE -> SW */
+        push_wall_ao(X, Y, X1, Y, Z, h[0], h[1], b->top, SH_TOP, wall_foot_ao(x, y - 1, z));         /* NW -> NE */
+        push_wall_ao(X1, Y1, X, Y1, Z, h[2], h[3], b->bottom, SH_BOTTOM, wall_foot_ao(x, y + 1, z)); /* SE -> SW */
     }
 }
 
 static void build_mesh(const WorldMap *m, int x0, int y0, int x1, int y1)
 {
     g_nmesh = 0;
+    g_bm = m;
+    static int env;
+    if (!env++) g_ao = getenv("GTA2_NO_AO") == NULL;
     for (int y = y0; y <= y1; y++)
         for (int x = x0; x <= x1; x++)
             for (int z = 0; z < MAP_LEVELS; z++) {
@@ -701,6 +786,7 @@ static void debug_blocks(const WorldMap *m)
         const GBlock *b = world_map_block(m, x, y, z);
         if (!b) { rt_log("dbg block %d,%d,%d: empty", x, y, z); continue; }
         int before = g_nmesh;
+        g_bm = m;
         build_block(x, y, z, b);
         rt_log("dbg block %d,%d,%d slope=%u lid=%04X L%04X R%04X T%04X B%04X -> %d verts", x, y, z, b->slope >> 2,
                b->lid, b->left, b->right, b->top, b->bottom, g_nmesh - before);

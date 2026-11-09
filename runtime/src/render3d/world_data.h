@@ -19,7 +19,9 @@ typedef struct __attribute__((packed)) {
     uint8_t arrows, slope;
 } GBlock;
 
-#define FACE_TILE(f) ((f) & 0x3FFu)
+#define FACE_TILE_RAW(f) ((f) & 0x3FFu)
+/* Tile 1023 marks an invisible face (collision only); treat it as no tile. */
+#define FACE_TILE(f) (FACE_TILE_RAW(f) == 0x3FFu ? 0u : FACE_TILE_RAW(f))
 #define FACE_FLAT(f) (((f) & 0x1000u) != 0)
 #define FACE_FLIP(f) (((f) & 0x2000u) != 0)
 #define FACE_ROT(f) (((f) >> 14) & 3u)
