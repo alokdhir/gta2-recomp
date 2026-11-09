@@ -10,6 +10,7 @@
  * Interface facts (signatures, layouts, flag bits) from gebdag/gta2-rtx-remix
  * (MIT) and the original DLL's code; the implementation is our own.
  */
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -117,6 +118,81 @@ static int texture_for(uint32_t rec)
     return t->gpu;
 }
 
+
+/* ---- lighting (same model as the original renderer) ------------------------------
+ * gbh_SetAmbient(a) sets ambient = a * 255. Primitives with flag 0x8000 (map
+ * tiles) are lit per vertex when ambient is below 255: each channel becomes
+ *   base * (shade / 255) * sum(light contributions) + ambient, clamped to 255,
+ * where a point light contributes (radius - d) / radius * intensity * colour
+ * inside its radius. The game supplies each vertex's world position in a
+ * second 4-vertex array right after the screen vertices (x, y, z at +0x80). */
+
+typedef struct {
+    float x, y, z, radius, radius2, intensity, r, g, b;
+} Light;
+
+#define MAX_LIGHTS 256
+static Light g_lights[MAX_LIGHTS];
+static int g_nlights;
+static float g_ambient = 255.0f;
+
+static void gbh_ResetLights(void)
+{
+    g_nlights = 0;
+    RETURN_STDCALL(0, 0);
+}
+
+/* gbh_AddLight(desc): +0 flags (bits 0-7 intensity, 8-15 radius (x/255 * 8 tiles),
+ * bits 16-17 type, 1 = point), +4/+8/+C position, +10 colour 0x00RRGGBB */
+static void gbh_AddLight(void)
+{
+    uint32_t d = ARG(0), flags = MEM32(d), col = MEM32(d + 16);
+    if ((flags & 0x30000u) == 0x10000u && g_nlights < MAX_LIGHTS) {
+        Light *l = &g_lights[g_nlights++];
+        memcpy(&l->x, GPTR(d + 4), 12);
+        l->intensity = (float)(flags & 0xFFu) / 255.0f;
+        l->radius = (float)((flags >> 8) & 0xFFu) / 255.0f * 8.0f;
+        l->radius2 = l->radius * l->radius;
+        l->r = (float)((col >> 16) & 0xFFu) / 255.0f;
+        l->g = (float)((col >> 8) & 0xFFu) / 255.0f;
+        l->b = (float)(col & 0xFFu) / 255.0f;
+    }
+    RETURN_STDCALL(0, 1);
+}
+
+static void gbh_SetAmbient(void)
+{
+    float a;
+    uint32_t v = ARG(0);
+    memcpy(&a, &v, 4);
+    g_ambient = a * 255.0f;
+    RETURN_STDCALL(0, 1);
+}
+
+static uint32_t light_vertex(uint32_t base, uint8_t shade, const float *world)
+{
+    float sr = 0, sg = 0, sb = 0;
+    for (int i = 0; i < g_nlights; i++) {
+        const Light *l = &g_lights[i];
+        float dx = world[0] - l->x, dy = world[1] - l->y, dz = world[2] - l->z;
+        float d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 > l->radius2 || l->radius <= 0) continue;
+        float f = (l->radius - sqrtf(d2)) / l->radius;
+        if (f <= 0) continue;
+        f *= l->intensity;
+        sr += f * l->r;
+        sg += f * l->g;
+        sb += f * l->b;
+    }
+    float s = shade / 255.0f;
+    float r = ((base >> 16) & 0xFFu) * s * sr + g_ambient;
+    float g = ((base >> 8) & 0xFFu) * s * sg + g_ambient;
+    float b = (base & 0xFFu) * s * sb + g_ambient;
+    uint32_t ir = r > 255 ? 255u : (uint32_t)lrintf(r), ig = g > 255 ? 255u : (uint32_t)lrintf(g),
+             ib = b > 255 ? 255u : (uint32_t)lrintf(b);
+    return (base & 0xFF000000u) | ir << 16 | ig << 8 | ib;
+}
+
 /* ---- primitives ------------------------------------------------------------- */
 
 static uint32_t shade_colour(uint8_t shade)
@@ -180,6 +256,11 @@ static void emit(uint32_t flags, uint32_t rec, uint32_t verts, unsigned n, uint8
             float f[8];
             memcpy(f, GPTR(p), 32);
             uint32_t col = (flags & F_VERTEX_COLOUR) ? MEM32(p + 16) : shade_colour(shade);
+            if ((flags & 0x8000u) && g_ambient != 255.0f) {
+                float world[3];
+                memcpy(world, GPTR(verts + 0x80u + 32u * i), 12);
+                col = light_vertex(col, shade, world);
+            }
             c[i] = (RVert){ f[0], f[1], f[6] / tw, f[7] / th, col };
         }
     }
@@ -501,28 +582,6 @@ static void gbh_GetUsedCache(void) { RETURN_STDCALL(0, 1); }
 static void gbh_BeginLevel(void) { RETURN_STDCALL(0, 0); }
 static void gbh_EndLevel(void) { RETURN_STDCALL(0, 0); }
 static void gbh_SetCamera(void) { RETURN_STDCALL(0, 4); }
-static void gbh_ResetLights(void) { RETURN_STDCALL(0, 0); }
-static void gbh_AddLight(void)
-{
-    static int n;
-    if (n++ < 12) {
-        uint32_t d = ARG(0);
-        float f[10];
-        memcpy(f, GPTR(d), sizeof f);
-        rt_log("gbh_AddLight frame %u raw %08X %08X | %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f", g_frame,
-               MEM32(d), MEM32(d + 4), f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8]);
-    }
-    RETURN_STDCALL(0, 1);
-}
-static void gbh_SetAmbient(void)
-{
-    static int n;
-    float a;
-    uint32_t v = ARG(0);
-    memcpy(&a, &v, 4);
-    if (n++ < 20) rt_log("gbh_SetAmbient(%.3f) frame %u", a, g_frame);
-    RETURN_STDCALL(0, 1);
-}
 static void ConvertColourBank(void) { RETURN_STDCALL(0, 1); }
 static void SetShadeTableA(void) { RETURN_STDCALL(0, 5); }
 static void gbh_PrintBitmap(void) { RETURN_STDCALL(0, 1); }
