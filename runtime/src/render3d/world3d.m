@@ -17,6 +17,7 @@
 #include "render3d/world_data.h"
 #include "render/lights.h"
 #include "render3d/upscale.h"
+#include "render/render.h"
 #include "video/presenter.h"
 #include "win32/imports.h"
 #include "win32/win32.h"
@@ -99,8 +100,11 @@ static int solve3(double m[3][3], const double b[3], double x[3])
 }
 
 /* Called at the start of every scene: finish the previous frame's fit. */
+static void sprites_reset(void);
+
 void world3d_begin_frame(float w, float h)
 {
+    sprites_reset();
     g_screen[0] = w;
     g_screen[1] = h;
     double x[3], y[3];
@@ -387,12 +391,61 @@ static void build_mesh(const WorldMap *m, int x0, int y0, int x1, int y1)
             }
 }
 
+/* ---- sprites -------------------------------------------------------------------
+ * Collected during the scene in the game's draw order; each is lifted a hair
+ * above the previous so that order (shadow, car, driver) survives without
+ * depth fighting, while the world still hides them. */
+typedef struct {
+    float x, y, z, u, v;
+    uint32_t argb;
+} SVert;
+typedef struct { int first, count, tex, blend; } SBatch;
+
+static SVert *g_sv;
+static int g_nsv, g_capsv;
+static SBatch *g_sb;
+static int g_nsb, g_capsb;
+static int g_sprite_order;
+
+static void sprites_reset(void)
+{
+    g_nsv = g_nsb = 0;
+    g_sprite_order = 0;
+}
+
+void world3d_sprite(const WSpriteVert q[4], int tex, int blend)
+{
+    float lift = 0.004f + 0.0006f * (float)(g_sprite_order++ % 2000);
+    static const int idx[6] = { 0, 1, 2, 0, 2, 3 };
+    if (g_nsv + 6 > g_capsv) {
+        g_capsv = (g_nsv + 6) * 2 + 1024;
+        g_sv = realloc(g_sv, sizeof *g_sv * (size_t)g_capsv);
+    }
+    for (int i = 0; i < 6; i++) {
+        const WSpriteVert *p = &q[idx[i]];
+        g_sv[g_nsv + i] = (SVert){ p->x, p->y, p->z + lift, p->u, p->v, p->argb };
+    }
+    SBatch *last = g_nsb ? &g_sb[g_nsb - 1] : NULL;
+    if (last && last->tex == tex && last->blend == blend && last->first + last->count == g_nsv) {
+        last->count += 6;
+    } else {
+        if (g_nsb == g_capsb) {
+            g_capsb = g_capsb * 2 + 64;
+            g_sb = realloc(g_sb, sizeof *g_sb * (size_t)g_capsb);
+        }
+        g_sb[g_nsb++] = (SBatch){ g_nsv, 6, tex, blend };
+    }
+    g_nsv += 6;
+}
+
 /* ---- Metal ---------------------------------------------------------------------------- */
 
 static id<MTLRenderPipelineState> g_pipe;
 static id<MTLDepthStencilState> g_depth_on;
 static id<MTLRenderPipelineState> g_halo_pipe;
 static id<MTLDepthStencilState> g_depth_test_nowrite;
+static id<MTLRenderPipelineState> g_spr_pipe[3];
+static id<MTLSamplerState> g_spr_samp;
 static id<MTLTexture> g_tiles;
 static id<MTLSamplerState> g_samp;
 static char g_tiles_for[1024];
@@ -467,6 +520,46 @@ static NSString *const kShaders =
      "    o.col = float3(L.rgb) * L.intensity * night * 0.28;\n"
      "    return o;\n"
      "}\n"
+     /* Sprites: the same camera, lit like the world (the game marks them lit too). */
+     "struct SVert { packed_float3 p; packed_float2 uv; uint argb; };\n"
+     "struct SOut { float4 pos [[position]]; float2 uv; float4 col; float3 world; };\n"
+     "vertex SOut s_vs(uint vid [[vertex_id]], const device SVert *v [[buffer(0)]], constant Cam &c [[buffer(1)]]) {\n"
+     "    SVert in = v[vid];\n"
+     "    float3 p = float3(in.p);\n"
+     "    float3 cam = float3(c.cam);\n"
+     "    float d = max(cam.z - p.z, 0.05);\n"
+     "    float2 s = c.centre + c.f * (p.xy - cam.xy) / d;\n"
+     "    float2 t = s / c.screen;\n"
+     "    float2 ndc = float2(mix(c.fit.x, c.fit.z, t.x), mix(c.fit.w, c.fit.y, t.y));\n"
+     "    float z01 = clamp((d - c.near_d) / (c.far_d - c.near_d), 0.0, 1.0);\n"
+     "    SOut o;\n"
+     "    o.pos = float4(ndc * d, z01 * d, d);\n"
+     "    o.uv = float2(in.uv);\n"
+     "    uint k = in.argb;\n"
+     "    o.col = float4((k >> 16) & 255, (k >> 8) & 255, k & 255, k >> 24) / 255.0;\n"
+     "    o.world = p;\n"
+     "    return o;\n"
+     "}\n"
+     "fragment float4 s_fs(SOut in [[stage_in]], texture2d<float> t [[texture(0)]], sampler sm [[sampler(0)]],\n"
+     "                     constant Cam &c [[buffer(1)]], const device Light *lights [[buffer(2)]],\n"
+     "                     constant int &mode [[buffer(3)]]) {\n"
+     "    float4 tex = t.sample(sm, in.uv);\n"
+     "    if (mode == 0 && tex.a < 0.5) discard_fragment();\n"
+     "    float3 l = float3(1.0);\n"
+     "    if (c.ambient < 255.0) {\n"
+     "        float3 sum = float3(0);\n"
+     "        for (int i = 0; i < c.nlights; i++) {\n"
+     "            float3 dv = in.world - float3(lights[i].p);\n"
+     "            float d2 = dot(dv, dv);\n"
+     "            if (d2 > lights[i].radius2) continue;\n"
+     "            sum += max((lights[i].radius - sqrt(d2)) / lights[i].radius, 0.0) * lights[i].intensity * float3(lights[i].rgb);\n"
+     "        }\n"
+     "        l = min(sum + c.ambient / 255.0, float3(1.0));\n"
+     "    }\n"
+     "    float3 rgb = tex.rgb * in.col.rgb * l;\n"
+     "    if (mode == 1) return float4(rgb * tex.a * in.col.a, 0);\n"
+     "    return float4(rgb, mode == 2 ? 1.0 : in.col.a);\n"
+     "}\n"
      "fragment float4 h_fs(HOut in [[stage_in]]) {\n"
      "    float r2 = dot(in.q, in.q);\n"
      "    float a = exp(-3.5 * r2) * (1.0 - smoothstep(0.85, 1.0, r2));\n"
@@ -506,6 +599,28 @@ static int setup(void)
     hd.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
     g_halo_pipe = [dev newRenderPipelineStateWithDescriptor:hd error:&err];
     if (!g_halo_pipe) rt_log("world3d: halo pipeline failed: %s", err.localizedDescription.UTF8String);
+    for (int i = 0; i < 3; i++) {
+        MTLRenderPipelineDescriptor *sp = [MTLRenderPipelineDescriptor new];
+        sp.vertexFunction = [lib newFunctionWithName:@"s_vs"];
+        sp.fragmentFunction = [lib newFunctionWithName:@"s_fs"];
+        MTLRenderPipelineColorAttachmentDescriptor *ca = sp.colorAttachments[0];
+        ca.pixelFormat = MTLPixelFormatBGRA8Unorm;
+        if (i == 0) { /* alpha */
+            ca.blendingEnabled = YES;
+            ca.sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;
+            ca.destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+        } else if (i == 1) { /* additive */
+            ca.blendingEnabled = YES;
+            ca.sourceRGBBlendFactor = ca.destinationRGBBlendFactor = MTLBlendFactorOne;
+        }
+        sp.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
+        g_spr_pipe[i] = [dev newRenderPipelineStateWithDescriptor:sp error:&err];
+        if (!g_spr_pipe[i]) rt_log("world3d: sprite pipeline failed: %s", err.localizedDescription.UTF8String);
+    }
+    MTLSamplerDescriptor *ssd = [MTLSamplerDescriptor new];
+    ssd.minFilter = ssd.magFilter = MTLSamplerMinMagFilterLinear;
+    ssd.sAddressMode = ssd.tAddressMode = MTLSamplerAddressModeClampToEdge;
+    g_spr_samp = [dev newSamplerStateWithDescriptor:ssd];
     MTLDepthStencilDescriptor *dn = [MTLDepthStencilDescriptor new];
     dn.depthCompareFunction = MTLCompareFunctionLessEqual;
     dn.depthWriteEnabled = NO;
@@ -657,6 +772,29 @@ void world3d_draw(id<MTLRenderCommandEncoder> enc, const float fit[4])
     [enc setFragmentTexture:g_tiles atIndex:0];
     [enc setFragmentSamplerState:g_samp atIndex:0];
     [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:(NSUInteger)g_nmesh];
+
+    /* sprites: depth-tested against the world, not written; game draw order */
+    if (g_nsb && g_spr_pipe[0]) {
+        id<MTLBuffer> sb = [presenter_device() newBufferWithBytes:g_sv
+                                                           length:sizeof *g_sv * (size_t)g_nsv
+                                                          options:MTLResourceStorageModeShared];
+        [enc setDepthStencilState:g_depth_test_nowrite];
+        [enc setVertexBuffer:sb offset:0 atIndex:0];
+        [enc setVertexBytes:&u length:sizeof u atIndex:1];
+        [enc setFragmentBytes:&u length:sizeof u atIndex:1];
+        [enc setFragmentBuffer:lb offset:0 atIndex:2];
+        [enc setFragmentSamplerState:g_spr_samp atIndex:0];
+        for (int i = 0; i < g_nsb; i++) {
+            SBatch *b = &g_sb[i];
+            id<MTLTexture> t = render_texture_object(b->tex);
+            if (!t) continue;
+            int mode = b->blend;
+            [enc setRenderPipelineState:g_spr_pipe[mode]];
+            [enc setFragmentTexture:t atIndex:0];
+            [enc setFragmentBytes:&mode length:sizeof mode atIndex:3];
+            [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:(NSUInteger)b->first vertexCount:(NSUInteger)b->count];
+        }
+    }
 
     /* light halos (dim scenes only; their strength fades in with darkness) */
     if (g_halo_pipe && u.nlights > 0 && u.ambient < 255.0f && g_halos) {

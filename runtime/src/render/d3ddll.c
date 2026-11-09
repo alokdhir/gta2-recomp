@@ -300,9 +300,36 @@ static int map_prim(uint32_t verts, unsigned n)
     return world3d_enabled();
 }
 
+/* Sprites (cars, people, objects) come from the game's sprite vertex array,
+ * which also carries each corner's absolute world position at +0x80. In 3D
+ * mode they become real quads in the world; returns 1 if taken. */
+#define SPRITE_VERTS 0x0066FE18u
+
+static int sprite_3d(uint32_t flags, uint32_t rec, uint32_t verts, uint8_t shade)
+{
+    if (verts != SPRITE_VERTS || !world3d_enabled() || (flags & F_EXPAND)) return 0;
+    float z0;
+    uint32_t zb = MEM32(verts + 8);
+    memcpy(&z0, &zb, 4);
+    if (z0 <= 0.0f) return 1; /* behind the eye: the original drops these too */
+    int tex = texture_for(rec);
+    float tw = rec ? (float)MEM16(rec + TEX_W) : 1, th = rec ? (float)MEM16(rec + TEX_H) : 1;
+    WSpriteVert q[4];
+    for (uint32_t i = 0; i < 4; i++) {
+        float f[8], w[3];
+        memcpy(f, GPTR(verts + 32u * i), 32);
+        memcpy(w, GPTR(verts + 0x80u + 32u * i), 12);
+        uint32_t col = (flags & F_VERTEX_COLOUR) ? MEM32(verts + 32u * i + 16u) : shade_colour(shade);
+        q[i] = (WSpriteVert){ w[0], w[1], w[2], f[6] / tw, f[7] / th, col };
+    }
+    world3d_sprite(q, tex, (int)blend_for(flags));
+    return 1;
+}
+
 static void emit(uint32_t flags, uint32_t rec, uint32_t verts, unsigned n, uint8_t shade)
 {
     if (!verts) return;
+    if (n == 4 && sprite_3d(flags, rec, verts, shade)) return;
     if (g_frame == g_dump_frame) dump_prim(flags, rec, verts, (flags & F_EXPAND) ? 1 : n, shade);
     float v0z;
     uint32_t z = MEM32(verts + 8);

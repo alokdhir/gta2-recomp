@@ -14,6 +14,14 @@ void world3d_set(int on); /* without saving the preference */
 void world3d_observe(float sx, float sy, float zf, float wx, float wy, float wz);
 void world3d_begin_frame(float screen_w, float screen_h);
 
+/* A world sprite: four corners (world tiles/levels), uv 0..1, ARGB colour. */
+typedef struct {
+    float x, y, z, u, v;
+    uint32_t argb;
+} WSpriteVert;
+/* blend: 0 alpha (colour-keyed), 1 additive, 2 opaque (render.h RBlend) */
+void world3d_sprite(const WSpriteVert q[4], int tex, int blend);
+
 #ifdef __OBJC__
 #import <Metal/Metal.h>
 /* Draw the world into the current frame (depth-tested). */

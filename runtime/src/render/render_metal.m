@@ -143,6 +143,11 @@ void render_texture_free(int tid)
     g_free_ids[g_nfree++] = tid;
 }
 
+id<MTLTexture> render_texture_object(int tid)
+{
+    return (tid >= 0 && tid < MAX_TEXTURES) ? g_textures[tid] : nil;
+}
+
 /* ---- frame ------------------------------------------------------------------------ */
 
 void render_begin_frame(void)

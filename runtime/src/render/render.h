@@ -15,6 +15,10 @@ typedef enum { RB_ALPHA = 0, RB_ADDITIVE = 1, RB_OPAQUE = 2 } RBlend;
 int render_texture_create(int width, int height);
 void render_texture_upload(int id, int width, int height, const uint32_t *rgba);
 void render_texture_free(int id);
+#ifdef __OBJC__
+#import <Metal/Metal.h>
+id<MTLTexture> render_texture_object(int tid);
+#endif
 
 /* Frame */
 void render_begin_frame(void);
