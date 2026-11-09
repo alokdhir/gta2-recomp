@@ -17,3 +17,4 @@ void user32_update_title(void);
 void user32_action_toggle_renderer(void); /* original <-> 3D */
 void user32_action_snapshot(void);        /* A/B screenshots + map log of the next frame */
 void user32_action_replay(void);          /* save the last few seconds */
+void user32_action_memsnap(void);         /* save a memory snapshot */

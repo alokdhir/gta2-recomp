@@ -39,6 +39,10 @@ static int stick_mode(void)
 
 void gamepad_poll(void)
 {
+    /* test runs (GTA2_HEADLESS) must not pick up the controller of a game being played alongside */
+    static int headless = -1;
+    if (headless < 0) headless = getenv("GTA2_HEADLESS") != NULL;
+    if (headless) return;
     GCController *pad = GCController.current;
     if (!pad) pad = GCController.controllers.firstObject;
     GCExtendedGamepad *g = pad.extendedGamepad;

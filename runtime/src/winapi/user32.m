@@ -9,6 +9,7 @@
 #import <AppKit/AppKit.h>
 #import <QuartzCore/CAMetalLayer.h>
 #include <ctype.h>
+#include <sys/stat.h>
 #include <math.h>
 #include <mach/mach_time.h>
 
@@ -275,6 +276,29 @@ static void poke_run(uint64_t t)
     }
 }
 
+static void memsnap_write(const char *path)
+{
+    FILE *f = fopen(path, "wb");
+    if (!f) return;
+    uint32_t hdr[4] = { 0x400000u, 0x700000u, GUEST_HEAP_LO, guest_heap_top() };
+    fwrite(hdr, 4, 4, f);
+    fwrite((const void *)XBOX_PTR(hdr[0]), 1, hdr[1] - hdr[0], f);
+    fwrite((const void *)XBOX_PTR(hdr[2]), 1, hdr[3] - hdr[2], f);
+    fclose(f);
+}
+
+/* Debug menu / Cmd-4: save a memory snapshot now (numbered), for finding game state. */
+void user32_action_memsnap(void)
+{
+    static int n;
+    const char *dir = getenv("GTA2_AB_DIR") ?: "captures";
+    mkdir(dir, 0755);
+    char path[1100];
+    snprintf(path, sizeof path, "%s/memsnap_%02d.bin", dir, n++);
+    memsnap_write(path);
+    rt_log("memsnap saved %s", path);
+}
+
 static void memsnap_run(uint64_t t)
 {
     poke_run(t);
@@ -282,15 +306,7 @@ static void memsnap_run(uint64_t t)
         const char *dir = getenv("GTA2_MEMSNAP_DIR") ?: ".";
         char path[1100];
         snprintf(path, sizeof path, "%s/snap_%02d.bin", dir, g_snap_pos);
-        FILE *f = fopen(path, "wb");
-        if (f) {
-            /* header: image lo, image hi, heap lo, heap hi; then the bytes */
-            uint32_t hdr[4] = { 0x400000u, 0x700000u, GUEST_HEAP_LO, guest_heap_top() };
-            fwrite(hdr, 4, 4, f);
-            fwrite((const void *)XBOX_PTR(hdr[0]), 1, hdr[1] - hdr[0], f);
-            fwrite((const void *)XBOX_PTR(hdr[2]), 1, hdr[3] - hdr[2], f);
-            fclose(f);
-        }
+        memsnap_write(path);
         float c[3];
         world3d_camera(c);
         rt_log("memsnap %d at %llu ms -> %s (camera %.2f, %.2f) player angle %.1f", g_snap_pos, (unsigned long long)t,
@@ -345,6 +361,7 @@ static NSCursor *blank_cursor(void)
 - (void)toggleRenderer:(id)sender { user32_action_toggle_renderer(); }
 - (void)snapshot:(id)sender { user32_action_snapshot(); }
 - (void)replay:(id)sender { user32_action_replay(); }
+- (void)memsnap:(id)sender { user32_action_memsnap(); }
 @end
 static GTA2Actions *g_actions;
 
@@ -434,8 +451,9 @@ void user32_init(void)
             { @"Switch Renderer (Original / 3D)", @"1", @selector(toggleRenderer:) },
             { @"Snapshot (A/B Screenshots + Map Log)", @"2", @selector(snapshot:) },
             { @"Save Instant Replay (Last 3 s)", @"3", @selector(replay:) },
+            { @"Save Memory Snapshot", @"4", @selector(memsnap:) },
         };
-        for (size_t i = 0; i < 3; i++) {
+        for (size_t i = 0; i < 4; i++) {
             NSMenuItem *it = [dbg addItemWithTitle:items[i].title action:items[i].sel keyEquivalent:items[i].key];
             it.target = g_actions;
             it.keyEquivalentModifierMask = NSEventModifierFlagCommand;
