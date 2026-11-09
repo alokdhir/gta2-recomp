@@ -6,6 +6,7 @@
 #import <GameController/GameController.h>
 
 #include "input/gamepad.h"
+#include "input/player.h"
 #include "guest_memory.h"
 #include "winapi/win32.h"
 #include <math.h>
@@ -23,9 +24,6 @@ static const unsigned g_mac[K_COUNT] = {
 static int g_held[K_COUNT];
 static int g_announced;
 
-int d3ddll_player_on_foot(void);
-
-int16_t *player_facing(void);
 
 /* Stick-direction movement on foot: the player turns to face where the left
  * stick points and walks. Tank controls (left/right turn) stay on the d-pad,
@@ -79,11 +77,11 @@ void gamepad_poll(void)
     const float t = 0.5f;
     int want[K_COUNT] = { 0 };
     float sx = g.leftThumbstick.xAxis.value, sy = g.leftThumbstick.yAxis.value;
-    int16_t *facing = stick_mode() && d3ddll_player_on_foot() ? player_facing() : NULL;
+    int16_t *facing = stick_mode() && player_on_foot() ? player_facing() : NULL;
     /* log stick-mode transitions, so replays can be matched to what it did */
     {
         static int prev_state = -1;
-        int state = !stick_mode() ? 0 : !d3ddll_player_on_foot() ? 1 : !facing ? 2 : sx * sx + sy * sy > 0.35f * 0.35f ? 4 : 3;
+        int state = !stick_mode() ? 0 : !player_on_foot() ? 1 : !facing ? 2 : sx * sx + sy * sy > 0.35f * 0.35f ? 4 : 3;
         static const char *names[] = { "tank controls", "in car / not on foot", "on foot, no player found",
                                        "on foot, stick at rest", "on foot, steering by stick" };
         if (state != prev_state) {

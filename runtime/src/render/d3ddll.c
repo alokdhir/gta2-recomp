@@ -322,32 +322,6 @@ static int map_prim(uint32_t verts, unsigned n)
  * mode they become real quads in the world; returns 1 if taken. */
 #define SPRITE_VERTS 0x0066FE18u
 
-static float g_player_angle;
-static int g_seen_player, g_on_foot;
-float d3ddll_player_angle(void) { return g_player_angle; }
-
-/* The player's facing, in GTA2's units: 0..1439 quarter degrees, 720 = north
- * (up the screen), increasing anticlockwise. Chain: [0x5EB4FC] is the game
- * object, +0x38 the local player, player +0x2C4 its ped, ped +0x168 the
- * ped's sprite, sprite +0x40 the rotation (found by snapshotting memory
- * while turning). NULL whenever a link doesn't look valid. */
-static int heap_ptr(uint32_t p, uint32_t span) { return p >= GUEST_HEAP_LO && p + span <= guest_heap_top(); }
-int16_t *player_facing(void)
-{
-    uint32_t game = MEM32(0x5EB4FCu);
-    if (!heap_ptr(game, 0x40)) return NULL;
-    uint32_t player = MEM32(game + 0x38u);
-    if (!heap_ptr(player, 0x2C8)) return NULL;
-    uint32_t ped = MEM32(player + 0x2C4u);
-    if (!heap_ptr(ped, 0x16C)) return NULL;
-    uint32_t spr = MEM32(ped + 0x168u);
-    if (!heap_ptr(spr, 0x44)) return NULL;
-    int16_t *a = (int16_t *)XBOX_PTR(spr + 0x40u);
-    return *a >= 0 && *a < 1440 ? a : NULL;
-}
-
-/* On foot = last frame drew the player's own ped sprite (3D renderer only). */
-int d3ddll_player_on_foot(void) { return world3d_enabled() && g_on_foot; }
 
 static int sprite_3d(uint32_t flags, uint32_t rec, uint32_t verts, uint8_t shade)
 {
@@ -373,22 +347,6 @@ static int sprite_3d(uint32_t flags, uint32_t rec, uint32_t verts, uint8_t shade
         q[i] = (WSpriteVert){ w[0], w[1], w[2], f[6] / tw, f[7] / th, col };
     }
     world3d_sprite(q, tex, (int)blend_for(flags));
-    /* on-foot detection: is the player's own ped sprite (matched by facing) drawn? */
-    {
-        float cam[3];
-        if (world3d_camera(cam) && (tw > th ? tw : th) < 32) {
-            float cx = (q[0].x + q[2].x) * 0.5f - cam[0], cy = (q[0].y + q[2].y) * 0.5f - cam[1];
-            if (cx * cx + cy * cy < 9.0f) {
-                float a = atan2f(q[1].y - q[0].y, q[1].x - q[0].x) * 57.29578f;
-                int v = (int)lroundf(720.0f - 4.0f * (a - 180.0f)) % 1440;
-                if (v < 0) v += 1440;
-                int16_t *f = player_facing();
-                int dv = f ? abs(v - *f) : 9999;
-                if (dv <= 60 || dv >= 1380) g_seen_player = 1; /* within 15 degrees */
-                g_player_angle = a;
-            }
-        }
-    }
     return 1;
 }
 
@@ -755,13 +713,6 @@ static void gbh_BeginScene(void)
 
 static void gbh_EndScene(void)
 {
-    /* hysteresis: seen this frame = on foot at once; "not on foot" only after
-     * ~0.5 s without the player's sprite (getting into a car takes longer),
-     * so a frame where the facing just changed can't flip the controls */
-    static int unseen = 1000;
-    unseen = g_seen_player ? 0 : unseen + 1;
-    g_on_foot = unseen < 30;
-    g_seen_player = 0;
     world3d_end_scene();
     RETURN_STDCALL(0, 0);
 }
