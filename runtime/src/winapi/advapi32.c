@@ -35,7 +35,7 @@ static const struct { const char *key, *name; uint32_t type; uint32_t dword; con
     { "screen", "renderdevice", REG_DWORD, 2, NULL },
     { "screen", "videodevice", REG_DWORD, 1, NULL },
     { "screen", "curr_dll_id", REG_DWORD, 1, NULL },
-    { "screen", "do_play_movie", REG_DWORD, 0, NULL }, /* no Bink yet */
+    { "screen", "do_play_movie", REG_DWORD, 1, NULL },
     { "screen", "exploding_on", REG_DWORD, 1, NULL },
     { "screen", "gamma", REG_DWORD, 10, NULL },
     { "screen", "lighting", REG_DWORD, 1, NULL },
@@ -121,7 +121,20 @@ static void reg_init(void)
         fclose(f);
         if (g_reg && CFGetTypeID(g_reg) != CFDictionaryGetTypeID()) { CFRelease(g_reg); g_reg = NULL; }
     }
-    if (g_reg) return;
+    if (g_reg) {
+        /* Settings from before the intro movie worked have do_play_movie = 0
+         * (our old default, not the player's choice): turn it on once. */
+        CFMutableDictionaryRef d = key_dict("software\\dma design ltd\\gta2\\screen", 1);
+        if (d && !CFDictionaryContainsKey(d, CFSTR("mac_movie"))) {
+            int32_t one = 1;
+            CFNumberRef v = CFNumberCreate(NULL, kCFNumberSInt32Type, &one);
+            CFDictionarySetValue(d, CFSTR("do_play_movie"), v);
+            CFDictionarySetValue(d, CFSTR("mac_movie"), v);
+            CFRelease(v);
+            reg_save();
+        }
+        return;
+    }
 
     g_reg = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     for (size_t i = 0; i < sizeof g_defaults / sizeof *g_defaults; i++) {

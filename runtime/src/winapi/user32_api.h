@@ -7,6 +7,14 @@ void user32_init(void);
 void *user32_metal_layer(uint32_t hwnd);
 void user32_set_client_size(uint32_t hwnd, int width, int height);
 
+/* Process pending window, keyboard and controller events (for modal loops
+ * such as the intro movie). */
+void user32_pump(void);
+/* While on, key presses (keyboard or controller) are counted by
+ * user32_presses() instead of reaching the game. */
+void user32_swallow_keys(int on);
+unsigned user32_presses(void);
+
 /* Press/release a key as if typed (macOS key code); used by the gamepad mapper. */
 void user32_inject_key(unsigned mac_keycode, int down);
 

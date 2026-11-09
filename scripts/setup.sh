@@ -52,6 +52,18 @@ if [ ! -f generated/gen/recomp_functions.h ] || [ "${RETRANSLATE:-0}" = 1 ]; the
     scripts/translate.sh > build/translate.log 2>&1 || { tail -20 build/translate.log; die "translation failed"; }
 fi
 
+if command -v ffmpeg >/dev/null; then
+    find game_files/data -iname '*.bik' | while read -r bik; do
+        mp4="${bik%.*}.mp4"
+        [ -f "$mp4" ] && continue
+        say "Converting $(basename "$bik") to MP4 (intro movie)"
+        ffmpeg -hide_banner -loglevel error -y -i "$bik" -c:v libx264 -crf 16 -preset slow \
+            -pix_fmt yuv420p -c:a aac -b:a 192k -movflags +faststart "$mp4"
+    done
+else
+    echo "  (no ffmpeg: the intro movie will be skipped; brew install ffmpeg and run setup again to get it)"
+fi
+
 say "Building GTA2.app"
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo > /dev/null
 ninja -C build | tail -1

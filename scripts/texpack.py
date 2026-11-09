@@ -21,10 +21,11 @@ Sprites (cars) are captured from the running game instead, so every colour
 remap and damage state the game produces is covered:
 
   GTA2_DUMP_SPRITES=<dump_dir> GTA2.app ...   (drive around)
-  texpack.py sprites-prep <dump_dir> <work_dir> [--all]
+  texpack.py sprites-prep <dump_dir>/<style> <work_dir> [--all] [--pack <pack_dir>]
       picks car-sized sprites (people are too small to gain from AI upscaling;
       --all takes every sprite in the folder, for a hand-picked set of objects),
-      pads them and bleeds colour into the transparent area.
+      pads them and bleeds colour into the transparent area. --pack skips
+      sprites the pack already has.
   realesrgan-ncnn-vulkan -i <work_dir>/in -o <work_dir>/out -n realesrgan-x4plus-anime -s 4
   texpack.py sprites-finish <work_dir> <pack_dir>
       writes <pack_dir>/sprites/<hash>.png at 4x, alpha restored.
@@ -126,10 +127,12 @@ def is_car(w, h):
     return max(w, h) >= 40 and min(w, h) >= 20
 
 
-def sprites_prep(dump, work, all_sizes=False):
+def sprites_prep(dump, work, all_sizes=False, pack=None):
     os.makedirs(f'{work}/in', exist_ok=True)
     os.makedirs(f'{work}/mask', exist_ok=True)
     done = set(os.listdir(f'{work}/in'))
+    if pack and os.path.isdir(f'{pack}/sprites'):
+        done |= set(os.listdir(f'{pack}/sprites'))
     n = 0
     for f in sorted(os.listdir(dump)):
         if not f.endswith('.png'):
@@ -144,7 +147,7 @@ def sprites_prep(dump, work, all_sizes=False):
         Image.fromarray(rgb).save(f'{work}/in/{h16}.png')
         np.save(f'{work}/mask/{h16}.npy', mask)
         n += 1
-    print(f'sprites-prep: {n} new car sprites in {work}/in')
+    print(f'sprites-prep: {n} new sprites in {work}/in')
 
 
 def sprites_finish(work, pack):
@@ -170,7 +173,8 @@ if __name__ == '__main__':
     if len(sys.argv) >= 4 and sys.argv[1] == 'prep':
         prep(sys.argv[2], sys.argv[3])
     elif len(sys.argv) >= 4 and sys.argv[1] == 'sprites-prep':
-        sprites_prep(sys.argv[2], sys.argv[3], '--all' in sys.argv)
+        pk = sys.argv[sys.argv.index('--pack') + 1] if '--pack' in sys.argv else None
+        sprites_prep(sys.argv[2], sys.argv[3], '--all' in sys.argv, pk)
     elif len(sys.argv) >= 4 and sys.argv[1] == 'sprites-finish':
         sprites_finish(sys.argv[2], sys.argv[3])
     elif len(sys.argv) >= 5 and sys.argv[1] == 'finish':

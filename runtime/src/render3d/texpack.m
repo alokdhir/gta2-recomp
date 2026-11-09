@@ -148,8 +148,17 @@ void texpack_dump(uint64_t hash, const uint32_t *rgba, int w, int h, int pal)
     }
     if (!dir || [seen containsObject:@(hash)]) return;
     [seen addObject:@(hash)];
+    /* one folder per style: <dir>/<style name>/ */
+    const char *style = world_style_path();
+    const char *base = style ? strrchr(style, '/') : NULL;
+    base = base ? base + 1 : (style ? style : "unknown");
+    const char *dot = strrchr(base, '.');
+    int len = dot ? (int)(dot - base) : (int)strlen(base);
+    char sub[1100];
+    snprintf(sub, sizeof sub, "%s/%.*s", dir, len, base);
+    mkdir(sub, 0755);
     char file[1200];
-    snprintf(file, sizeof file, "%s/%016llX_%dx%d_p%d.png", dir, (unsigned long long)hash, w, h, pal);
+    snprintf(file, sizeof file, "%s/%016llX_%dx%d_p%d.png", sub, (unsigned long long)hash, w, h, pal);
     size_t n = (size_t)w * h * 4;
     uint32_t *copy = malloc(n);
     memcpy(copy, rgba, n);

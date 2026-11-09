@@ -12,6 +12,7 @@
 #include <math.h>
 #include "recomp_types.h"
 #include "video/video.h"
+#include "video/movie.h"
 #include "winapi/imports.h"
 #include "debug/watch.h"
 
@@ -26,6 +27,20 @@ void sub_004031C0(void)
 }
 
 
+/* 0x00481F20  play_movie(const char *bik_path, HDIGDRIVER miles): opens the
+ * movie with Bink and leaves the front end to step it each frame until the
+ * state byte (0x665078) drops back from 1/2. Play it natively instead, to the
+ * end or a key press, and leave the handles (0x664FF4 Bink, 0x664FF0
+ * BinkBuffer) and state at 0 so the front end moves straight on. */
+void sub_00481F20(void)
+{
+    uint32_t path = ARG(0);
+    if (path) movie_play(GSTR(path));
+    MEM32(0x664FF4) = 0;
+    MEM32(0x664FF0) = 0;
+    MEM8(0x665078) = 0;
+    RETURN_STDCALL(0, 2);
+}
 
 /* 0x0041E7A0  camera: computes the "visible" rectangle that traffic spawning
  * and recycling, pedestrian spawning and the object draw all test against.

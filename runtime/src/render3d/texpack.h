@@ -6,7 +6,7 @@
  *   textures/<style name>/sprites/<hash>.png   (any size; scaled to fit)
  *
  * GTA2_DUMP_SPRITES=<dir> writes each distinct world sprite the game draws as
- * <dir>/<hash>_<w>x<h>_p<palette>.png, the input for scripts/texpack.py
+ * <dir>/<style name>/<hash>_<w>x<h>_p<palette>.png, the input for scripts/texpack.py
  * sprites (the palette id helps tell people from objects). */
 #pragma once
 #include <stdint.h>

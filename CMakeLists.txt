@@ -37,6 +37,7 @@ add_executable(gta2 MACOSX_BUNDLE
   runtime/src/audio/mixer.c
   runtime/src/audio/miles.c
   runtime/src/video/presenter.m
+  runtime/src/video/movie.m
   runtime/src/render/d3ddll.c
   runtime/src/debug/watch.c
   runtime/src/render3d/world_data.c
@@ -50,12 +51,13 @@ add_executable(gta2 MACOSX_BUNDLE
 target_include_directories(gta2 PRIVATE runtime/include runtime/src ${GEN}/gen)
 target_compile_options(gta2 PRIVATE -Wall -Wextra -Wno-unused-parameter -fno-strict-aliasing)
 set_source_files_properties(runtime/src/render3d/world3d.m runtime/src/winapi/user32.m runtime/src/video/presenter.m
-  runtime/src/input/gamepad.m runtime/src/render3d/texpack.m
+  runtime/src/video/movie.m runtime/src/input/gamepad.m runtime/src/render3d/texpack.m
   runtime/src/render/render_metal.m
   PROPERTIES COMPILE_FLAGS -fobjc-arc)
 target_link_libraries(gta2 PRIVATE "-framework AppKit" "-framework QuartzCore" "-framework Metal"
   "-framework CoreFoundation" "-framework ImageIO" "-framework UniformTypeIdentifiers"
-  "-framework CoreGraphics" "-framework AudioToolbox" "-framework GameController")
+  "-framework CoreGraphics" "-framework AudioToolbox" "-framework GameController"
+  "-framework AVFoundation" "-framework CoreMedia")
 
 # GTA2.app; build/gta2 links to its executable for the command-line scripts.
 set_target_properties(gta2 PROPERTIES

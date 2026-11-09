@@ -154,8 +154,16 @@ void user32_action_snapshot(void)
 
 void user32_action_replay(void) { presenter_save_replay(); }
 
+/* While a movie plays, presses only count as "skip" and never reach the game. */
+static int g_swallow_keys;
+static unsigned g_presses;
+
 static void key_transition(uint32_t hwnd, unsigned mac_keycode, int down, int repeat, NSString *chars)
 {
+    if (g_swallow_keys) {
+        if (down && !repeat) g_presses++;
+        return;
+    }
     uint8_t vk, dik;
     if (!keymap_from_mac(mac_keycode, &vk, &dik)) return;
     /* F-keys still work (scripts use them); the menu's Cmd-1/2/3 are the easy way */
@@ -489,6 +497,16 @@ static void pump_appkit(void)
         }
     }
 }
+
+void user32_pump(void) { pump_appkit(); }
+
+void user32_swallow_keys(int on)
+{
+    g_swallow_keys = on;
+    if (!on) memset(g_key_down, 0, sizeof g_key_down);
+}
+
+unsigned user32_presses(void) { return g_presses; }
 
 void *user32_metal_layer(uint32_t hwnd)
 {
