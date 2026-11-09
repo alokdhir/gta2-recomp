@@ -39,6 +39,7 @@ add_executable(gta2 MACOSX_BUNDLE
   runtime/src/video/presenter.m
   runtime/src/render/d3ddll.c
   runtime/src/debug/watch.c
+  runtime/src/render3d/world_data.c
   runtime/src/render/render_metal.m
   ${GEN}/imports_table.c
   $<TARGET_OBJECTS:gta2_game>)

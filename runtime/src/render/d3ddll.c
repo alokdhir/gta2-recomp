@@ -18,6 +18,7 @@
 #include "guest_memory.h"
 #include "render/render.h"
 #include "debug/watch.h"
+#include "render3d/world_data.h"
 #include "win32/imports.h"
 #include "win32/modules.h"
 
@@ -542,6 +543,7 @@ static void gbh_BeginScene(void)
     g_tiles_this_scene = 0;
     g_frame++;
     watch_rearm();
+    world_debug_dump();
     if (g_frame % 100 == 0) rt_log("scene %u", g_frame);
     render_begin_frame();
     RETURN_STDCALL(0, 0);

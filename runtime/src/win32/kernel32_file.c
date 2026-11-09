@@ -14,6 +14,7 @@
 #include "guest_memory.h"
 #include "win32/imports.h"
 #include "win32/win32.h"
+#include "render3d/world_data.h"
 
 /* ---- handle table --------------------------------------------------------- */
 
@@ -146,6 +147,8 @@ static void CreateFileA(void)
         free(path);
         RETURN_STDCALL(INVALID_HANDLE, 7);
     }
+    size_t pl = strlen(path);
+    if (pl > 4 && !strcasecmp(path + pl - 4, ".sty")) world_note_style_path(path);
     uint32_t h = win32_new_handle(WIN32_H_FILE, fd);
     win32_get_handle(h, WIN32_H_FILE)->path = path;
     win32_set_last_error(0);
