@@ -18,3 +18,4 @@ void sub_004031C0(void)
     MEM32(ARG(1)) = 2; /* VER_PLATFORM_WIN32_NT */
     RETURN_STDCALL(0, 2);
 }
+

@@ -132,9 +132,30 @@ static RBlend blend_for(uint32_t flags)
 }
 
 /* Emit a fan of n game vertices (8 floats each) as triangles. */
+/* GTA2_DUMP_FRAME=n: log every primitive of scene n (for render debugging). */
+static unsigned g_dump_frame = 0xFFFFFFFFu;
+static const char *g_draw_kind = "";
+static uint32_t g_draw_ret;
+static unsigned g_tiles_this_scene;
+static int g_dump_on_tiles = -1; /* GTA2_DUMP_TILES: dump the first scene after one with >= 50 tiles */
+
+static void dump_prim(uint32_t flags, uint32_t rec, uint32_t verts, unsigned n, uint8_t shade)
+{
+    float f[32];
+    memcpy(f, GPTR(verts), 32u * n);
+    char line[512];
+    int k = snprintf(line, sizeof line, "dump ret=%08X %s f=%05X tex=%ux%u pal=%u sh=%3u |", g_draw_ret, g_draw_kind, flags,
+                     rec ? MEM16(rec + TEX_W) : 0, rec ? MEM16(rec + TEX_H) : 0, rec ? MEM16(rec + TEX_PAL) : 0, shade);
+    for (unsigned i = 0; i < n && k < (int)sizeof line - 64; i++)
+        k += snprintf(line + k, sizeof line - (size_t)k, " (%.0f,%.0f z%.4f c%08X)", f[8 * i], f[8 * i + 1],
+                      f[8 * i + 2], ((uint32_t *)f)[8 * i + 4]);
+    rt_log("%s", line);
+}
+
 static void emit(uint32_t flags, uint32_t rec, uint32_t verts, unsigned n, uint8_t shade)
 {
     if (!verts) return;
+    if (g_frame == g_dump_frame) dump_prim(flags, rec, verts, (flags & F_EXPAND) ? 1 : n, shade);
     float v0z;
     uint32_t z = MEM32(verts + 8);
     memcpy(&v0z, &z, 4);
@@ -184,11 +205,59 @@ static void trace_quad(const char *what)
         rt_log("   v%d x=%.1f y=%.1f z=%.3f rhw=%.3f col=%08X u=%.2f v=%.2f", i, f[8*i], f[8*i+1], f[8*i+2], f[8*i+3],
                ((uint32_t *)f)[8*i+4], f[8*i+6], f[8*i+7]);
 }
-static void gbh_DrawQuad(void) { trace_quad("DrawQuad");  emit(ARG(0), ARG(1), ARG(2), 4, (uint8_t)ARG(3)); RETURN_STDCALL(0, 4); }
-static void gbh_DrawQuadClipped(void) { emit(ARG(0), ARG(1), ARG(2), 4, (uint8_t)ARG(3)); RETURN_STDCALL(0, 5); }
-static void gbh_DrawTile(void) { emit(ARG(0), ARG(1), ARG(2), 4, (uint8_t)ARG(3)); RETURN_STDCALL(0, 4); }
-static void gbh_DrawTilePart(void) { emit(ARG(0), ARG(1), ARG(2), 4, (uint8_t)ARG(3)); RETURN_STDCALL(0, 4); }
-static void gbh_DrawTriangle(void) { emit(ARG(0), ARG(1), ARG(2), 3, (uint8_t)ARG(3)); RETURN_STDCALL(0, 4); }
+static void gbh_DrawQuad(void) { trace_quad("DrawQuad"); g_draw_kind = "quad"; emit(ARG(0), ARG(1), ARG(2), 4, (uint8_t)ARG(3)); RETURN_STDCALL(0, 4); }
+static void gbh_DrawQuadClipped(void) { g_draw_kind = "quadc"; emit(ARG(0), ARG(1), ARG(2), 4, (uint8_t)ARG(3)); RETURN_STDCALL(0, 5); }
+/* Tiles: unless flag 0x4000 is set the original renderer ignores the UVs in
+ * the vertices and lays the 64x64 tile out itself -- texel corners 0.5..63.5,
+ * then rotation (flags & 0x60) and flips (0x08 horizontal, 0x10 vertical).
+ * It writes them back into the game's vertex array, so we do the same. */
+static void tile_uvs(uint32_t flags, uint32_t verts)
+{
+    if (flags & 0x4000u) return;
+    float uv[4][2] = { { 0.5f, 0.5f }, { 63.5f, 0.5f }, { 63.5f, 63.5f }, { 0.5f, 63.5f } };
+    float t[2];
+    switch (flags & 0x60u) {
+    case 0x20: /* v0 <- v3 <- v2 <- v1 <- v0 */
+        memcpy(t, uv[0], 8); memcpy(uv[0], uv[3], 8); memcpy(uv[3], uv[2], 8);
+        memcpy(uv[2], uv[1], 8); memcpy(uv[1], t, 8);
+        break;
+    case 0x40: /* 180 degrees: both flips */
+        flags ^= 0x18u;
+        break;
+    case 0x60: /* v0 <- v1 <- v2 <- v3 <- v0 */
+        memcpy(t, uv[0], 8); memcpy(uv[0], uv[1], 8); memcpy(uv[1], uv[2], 8);
+        memcpy(uv[2], uv[3], 8); memcpy(uv[3], t, 8);
+        break;
+    }
+    if (flags & 0x08u) { /* swap 0<->1, 3<->2 */
+        memcpy(t, uv[0], 8); memcpy(uv[0], uv[1], 8); memcpy(uv[1], t, 8);
+        memcpy(t, uv[3], 8); memcpy(uv[3], uv[2], 8); memcpy(uv[2], t, 8);
+    }
+    if (flags & 0x10u) { /* swap 0<->3, 1<->2 */
+        memcpy(t, uv[0], 8); memcpy(uv[0], uv[3], 8); memcpy(uv[3], t, 8);
+        memcpy(t, uv[1], 8); memcpy(uv[1], uv[2], 8); memcpy(uv[2], t, 8);
+    }
+    for (uint32_t i = 0; i < 4; i++) memcpy(GPTR(verts + 32u * i + 24u), uv[i], 8);
+}
+
+static void gbh_DrawTile(void)
+{
+    g_tiles_this_scene++;
+    g_draw_kind = "tile";
+    g_draw_ret = MEM32(g_esp);
+    if (ARG(2)) tile_uvs(ARG(0), ARG(2));
+    emit(ARG(0), ARG(1), ARG(2), 4, (uint8_t)ARG(3));
+    RETURN_STDCALL(0, 4);
+}
+
+static void gbh_DrawTilePart(void)
+{
+    g_draw_kind = "tilep";
+    if (ARG(2)) tile_uvs(ARG(0), ARG(2));
+    emit(ARG(0), ARG(1), ARG(2), 4, (uint8_t)ARG(3));
+    RETURN_STDCALL(0, 4);
+}
+static void gbh_DrawTriangle(void) { g_draw_kind = "tri"; emit(ARG(0), ARG(1), ARG(2), 3, (uint8_t)ARG(3)); RETURN_STDCALL(0, 4); }
 
 static void solid_rect(float x0, float y0, float x1, float y1, uint32_t argb)
 {
@@ -380,7 +449,16 @@ static void gbh_BlitImage(void)
 
 static void gbh_BeginScene(void)
 {
+    if (g_frame == 1 && getenv("GTA2_DUMP_FRAME")) g_dump_frame = (unsigned)atoi(getenv("GTA2_DUMP_FRAME"));
+    if (g_dump_on_tiles < 0) g_dump_on_tiles = getenv("GTA2_DUMP_TILES") != NULL;
+    if (g_dump_on_tiles == 1 && g_tiles_this_scene >= 50) {
+        g_dump_frame = g_frame + 1;
+        g_dump_on_tiles = 2;
+        rt_log("dumping scene %u", g_dump_frame);
+    }
+    g_tiles_this_scene = 0;
     g_frame++;
+    if (g_frame % 100 == 0) rt_log("scene %u", g_frame);
     render_begin_frame();
     RETURN_STDCALL(0, 0);
 }
@@ -424,8 +502,27 @@ static void gbh_BeginLevel(void) { RETURN_STDCALL(0, 0); }
 static void gbh_EndLevel(void) { RETURN_STDCALL(0, 0); }
 static void gbh_SetCamera(void) { RETURN_STDCALL(0, 4); }
 static void gbh_ResetLights(void) { RETURN_STDCALL(0, 0); }
-static void gbh_AddLight(void) { RETURN_STDCALL(0, 1); }
-static void gbh_SetAmbient(void) { RETURN_STDCALL(0, 1); }
+static void gbh_AddLight(void)
+{
+    static int n;
+    if (n++ < 12) {
+        uint32_t d = ARG(0);
+        float f[10];
+        memcpy(f, GPTR(d), sizeof f);
+        rt_log("gbh_AddLight frame %u raw %08X %08X | %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f", g_frame,
+               MEM32(d), MEM32(d + 4), f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8]);
+    }
+    RETURN_STDCALL(0, 1);
+}
+static void gbh_SetAmbient(void)
+{
+    static int n;
+    float a;
+    uint32_t v = ARG(0);
+    memcpy(&a, &v, 4);
+    if (n++ < 20) rt_log("gbh_SetAmbient(%.3f) frame %u", a, g_frame);
+    RETURN_STDCALL(0, 1);
+}
 static void ConvertColourBank(void) { RETURN_STDCALL(0, 1); }
 static void SetShadeTableA(void) { RETURN_STDCALL(0, 5); }
 static void gbh_PrintBitmap(void) { RETURN_STDCALL(0, 1); }

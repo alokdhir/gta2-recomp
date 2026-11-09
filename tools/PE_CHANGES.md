@@ -9,3 +9,4 @@ Upstream: see xboxrecomp/README.md. Changes made so the pipeline accepts a Win32
 - `xbe_parser/xbe_parser.py` `XBEParser.parse()`: MZ input is delegated to `pe_parser`.
 - `disasm/loader.py` `load_image()`: accepts MZ as well as XBEH magic.
 - `recomp/lifter.py` + `translator.py` (implicit-register table): added `pushaw`/`popaw` (16-bit pusha/popa; gta2.exe uses it in its rdtsc timing helper at 0x4C3850).
+- `recomp/lifter.py`: one-operand `mul`/`imul`/`div`/`idiv` are now size-aware (8-bit: AX/AL/AH, 16-bit: DX:AX). Upstream lifted them all as 32-bit EDX:EAX, which clobbered EDX — in gta2.exe this zeroed the map wall shades (sub_0046B620).

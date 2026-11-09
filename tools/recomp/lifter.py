@@ -2057,8 +2057,15 @@ class Lifter:
     def _lift_imul(self, insn, ops):
         nops = len(ops)
         if nops == 1:
-            # One operand: edx:eax = eax * ops[0]
+            # gta2-recomp: the one-operand form is size-dependent. r/m8 gives
+            # AX = AL * src (EDX untouched); r/m16 gives DX:AX = AX * src.
             src = _fmt_operand_read(ops[0])
+            w = _operand_width(ops[0]) or 4
+            if w == 1:
+                return [f"SET_LO16(eax, (uint16_t)((int16_t)(int8_t)LO8(eax) * (int16_t)(int8_t)({src})));"]
+            if w == 2:
+                return [f"{{ int32_t _r = (int32_t)(int16_t)LO16(eax) * (int32_t)(int16_t)({src});",
+                        f"  SET_LO16(eax, (uint16_t)_r); SET_LO16(edx, (uint16_t)((uint32_t)_r >> 16)); }}"]
             return [
                 f"{{ int64_t _r = (int64_t)(int32_t)eax * (int64_t)(int32_t){src};",
                 f"  eax = (uint32_t)_r; edx = (uint32_t)(_r >> 32); }}"
@@ -2079,6 +2086,27 @@ class Lifter:
         if len(ops) < 1:
             return [f"/* {m}: no operand */"]
         src = _fmt_operand_read(ops[0])
+        # gta2-recomp: 8- and 16-bit forms work on AX / DX:AX, not EDX:EAX.
+        w = _operand_width(ops[0]) or 4
+        if w == 1:
+            if m == "mul":
+                return [f"SET_LO16(eax, (uint16_t)(LO8(eax) * (uint8_t)({src})));"]
+            if m == "div":
+                return [f"{{ uint16_t _n = LO16(eax); uint8_t _d = (uint8_t)({src});",
+                        f"  SET_LO8(eax, _n / _d); SET_HI8(eax, _n % _d); }}"]
+            if m == "idiv":
+                return [f"{{ int16_t _n = (int16_t)LO16(eax); int8_t _d = (int8_t)({src});",
+                        f"  SET_LO8(eax, (uint8_t)(_n / _d)); SET_HI8(eax, (uint8_t)(_n % _d)); }}"]
+        if w == 2:
+            if m == "mul":
+                return [f"{{ uint32_t _r = (uint32_t)LO16(eax) * (uint16_t)({src});",
+                        f"  SET_LO16(eax, _r); SET_LO16(edx, _r >> 16); }}"]
+            if m == "div":
+                return [f"{{ uint32_t _n = (uint32_t)LO16(edx) << 16 | LO16(eax); uint16_t _d = (uint16_t)({src});",
+                        f"  SET_LO16(eax, _n / _d); SET_LO16(edx, _n % _d); }}"]
+            if m == "idiv":
+                return [f"{{ int32_t _n = (int32_t)((uint32_t)LO16(edx) << 16 | LO16(eax)); int16_t _d = (int16_t)({src});",
+                        f"  SET_LO16(eax, (uint16_t)(_n / _d)); SET_LO16(edx, (uint16_t)(_n % _d)); }}"]
         if m == "mul":
             return [
                 f"{{ uint64_t _r = (uint64_t)eax * (uint64_t){src};",
