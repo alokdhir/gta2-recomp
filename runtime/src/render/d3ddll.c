@@ -320,6 +320,10 @@ static int sprite_3d(uint32_t flags, uint32_t rec, uint32_t verts, uint8_t shade
         memcpy(f, GPTR(verts + 32u * i), 32);
         memcpy(w, GPTR(verts + 0x80u + 32u * i), 12);
         uint32_t col = (flags & F_VERTEX_COLOUR) ? MEM32(verts + 32u * i + 16u) : shade_colour(shade);
+        /* light it exactly as the original would at this moment: the game
+         * raises ambient again before drawing objects, so the map's darker
+         * level must not apply here */
+        if ((flags & 0x8000u) && g_ambient != 255.0f) col = light_vertex(col, shade, w);
         q[i] = (WSpriteVert){ w[0], w[1], w[2], f[6] / tw, f[7] / th, col };
     }
     world3d_sprite(q, tex, (int)blend_for(flags));
