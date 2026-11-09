@@ -434,7 +434,7 @@ _EFLAGS_PRESERVE = frozenset({
     "loop", "loope", "loopne",
     # pushfd READS the flags and leaves them alone, so it belongs here.
     # popfd does NOT -- see _FLAGS_UNDEFINED.
-    "pushfd", "pushal", "pushad", "popal", "popad",
+    "pushfd", "pushal", "pushad", "popal", "popad", "pushaw", "popaw",
     "sgdt", "ljmp", "sfence",
     # SSE scalar float
     "movss", "movsd",
@@ -1408,6 +1408,15 @@ class Lifter:
         if m in ("popal", "popad"):
             return ["POP32(esp, edi); POP32(esp, esi); POP32(esp, ebp); esp += 4; "
                     "POP32(esp, ebx); POP32(esp, edx); POP32(esp, ecx); POP32(esp, eax); /* popal */"]
+        # gta2-recomp: 16-bit forms (66 60 / 66 61). Eight 2-byte slots; POPAW
+        # restores only the low halves and discards the SP slot.
+        if m in ("pushaw",):
+            return ["{ uint32_t _pa_esp = esp; uint32_t _pv[8] = { eax, ecx, edx, ebx, _pa_esp, ebp, esi, edi }; "
+                    "for (int _i = 0; _i < 8; _i++) { esp -= 2; MEM16(esp) = (uint16_t)_pv[_i]; } } /* pushaw */"]
+        if m in ("popaw",):
+            return ["{ uint32_t *_pr[8] = { &edi, &esi, &ebp, NULL, &ebx, &edx, &ecx, &eax }; "
+                    "for (int _i = 0; _i < 8; _i++) { uint16_t _w = MEM16(esp); esp += 2; "
+                    "if (_pr[_i]) *_pr[_i] = (*_pr[_i] & 0xFFFF0000u) | _w; } } /* popaw */"]
 
         # ── Arithmetic ──
         if m in ("add", "sub", "and", "or", "xor"):

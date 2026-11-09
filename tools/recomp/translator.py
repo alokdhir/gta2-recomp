@@ -1517,6 +1517,8 @@ class FunctionTranslator:
             "loop": {"ecx"}, "loope": {"ecx"}, "loopne": {"ecx"},
             "leave": {"esp", "ebp"}, "popad": set(full_registers),
             "popal": set(full_registers), "pushal": {"esp"}, "pushad": {"esp"},
+            # gta2-recomp: 16-bit pusha/popa read/write every register
+            "pushaw": set(full_registers), "popaw": set(full_registers),
             "xlat": {"eax"}, "xlatb": {"eax"},
         }
 
@@ -2151,7 +2153,7 @@ class FunctionTranslator:
             used_regs.add("ebp")
 
         # PUSHAD/POPAD implicitly read or restore every register.
-        if any(i.mnemonic in ("pushal", "pushad", "popal", "popad")
+        if any(i.mnemonic in ("pushal", "pushad", "popal", "popad", "pushaw", "popaw")
                for i in instructions):
             used_regs.update(("ebx", "esi", "edi", "ebp"))
 

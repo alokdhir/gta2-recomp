@@ -8,6 +8,7 @@
  */
 #import <AppKit/AppKit.h>
 #import <QuartzCore/CAMetalLayer.h>
+#include <ctype.h>
 #include <mach/mach_time.h>
 
 #include "guest_call.h"
@@ -120,24 +121,83 @@ static uint32_t wnd_send(uint32_t hwnd, uint32_t msg, uint32_t w, uint32_t l)
 
 /* ---- AppKit glue -------------------------------------------------------------- */
 
-static void key_event(NSEvent *e, int down)
+/* One key transition from any source (AppKit or the GTA2_KEYS test script). */
+static void key_transition(uint32_t hwnd, unsigned mac_keycode, int down, int repeat, NSString *chars)
 {
     uint8_t vk, dik;
-    if (!keymap_from_mac(e.keyCode, &vk, &dik)) return;
-    if (!(down && e.isARepeat)) dinput_key_event(dik, down, (uint32_t)now_ms());
+    if (!keymap_from_mac(mac_keycode, &vk, &dik)) return;
+    if (!repeat) dinput_key_event(dik, down, (uint32_t)now_ms());
     g_key_down[dik] = down ? 0x80 : 0;
-    uint32_t hwnd = ((GTA2View *)e.window.contentView).hwnd;
-    uint32_t repeat = (down && e.isARepeat) ? (1u << 30) : 0;
-    uint32_t lparam = 1u | (uint32_t)(dik & 0x7F) << 16 | (dik & 0x80 ? 1u << 24 : 0) | repeat |
-                      (down ? 0 : 0xC0000000u);
+    uint32_t lparam = 1u | (uint32_t)(dik & 0x7F) << 16 | (dik & 0x80 ? 1u << 24 : 0) |
+                      (repeat ? 1u << 30 : 0) | (down ? 0 : 0xC0000000u);
     post(hwnd, down ? WM_KEYDOWN : WM_KEYUP, vk, lparam);
     if (down) {
-        NSString *chars = e.characters;
         for (NSUInteger i = 0; i < chars.length; i++) {
             unichar c = [chars characterAtIndex:i];
             if (c < 256 && c != 0x7F && (c >= 0x20 || c == '\r' || c == '\b' || c == 0x1B))
                 post(hwnd, WM_CHAR, c, lparam);
         }
+    }
+}
+
+static void key_event(NSEvent *e, int down)
+{
+    uint32_t hwnd = ((GTA2View *)e.window.contentView).hwnd;
+    key_transition(hwnd, e.keyCode, down, down && e.isARepeat, down ? e.characters : nil);
+}
+
+/* GTA2_KEYS="ms:key[,ms:key...]": press (and release 80 ms later) keys at
+ * times after startup, for unattended test runs. Keys: return escape space
+ * up down left right tab, or a single letter/digit. */
+typedef struct { uint64_t at; unsigned mac; int down; } ScriptKey;
+static ScriptKey g_script[256];
+static int g_nscript, g_script_pos;
+static uint64_t g_t0;
+
+static int mac_code_for(const char *name)
+{
+    static const struct { const char *n; int c; } named[] = {
+        { "return", 0x24 }, { "enter", 0x24 }, { "escape", 0x35 }, { "esc", 0x35 }, { "space", 0x31 },
+        { "up", 0x7E }, { "down", 0x7D }, { "left", 0x7B }, { "right", 0x7C }, { "tab", 0x30 },
+        { "ctrl", 0x3B }, { "shift", 0x38 }, { "alt", 0x3A },
+    };
+    for (size_t i = 0; i < sizeof named / sizeof *named; i++)
+        if (!strcasecmp(name, named[i].n)) return named[i].c;
+    static const char letters[] = "asdfhgzxcv\0bqweryt123465=97-80]ou[ip\0lj'k;\\,/nm.";
+    if (strlen(name) == 1)
+        for (int i = 0; letters[i] || i < 0x30; i++)
+            if (letters[i] && tolower((unsigned char)name[0]) == letters[i]) return i;
+    return -1;
+}
+
+static void script_load(void)
+{
+    const char *s = getenv("GTA2_KEYS");
+    g_t0 = now_ms();
+    if (!s) return;
+    char *copy = strdup(s), *save = NULL;
+    for (char *tok = strtok_r(copy, ",", &save); tok && g_nscript < 254; tok = strtok_r(NULL, ",", &save)) {
+        char *colon = strchr(tok, ':');
+        if (!colon) continue;
+        *colon = 0;
+        int code = mac_code_for(colon + 1);
+        if (code < 0) { rt_log("GTA2_KEYS: unknown key %s", colon + 1); continue; }
+        uint64_t at = strtoull(tok, NULL, 10);
+        g_script[g_nscript++] = (ScriptKey){ at, (unsigned)code, 1 };
+        g_script[g_nscript++] = (ScriptKey){ at + 80, (unsigned)code, 0 };
+    }
+    free(copy);
+}
+
+static void script_run(void)
+{
+    uint64_t t = now_ms() - g_t0;
+    while (g_script_pos < g_nscript && g_script[g_script_pos].at <= t) {
+        ScriptKey *k = &g_script[g_script_pos++];
+        uint32_t hwnd = 0;
+        for (int i = 0; i < MAX_WINDOWS; i++) if (g_windows[i].hwnd) { hwnd = g_windows[i].hwnd; break; }
+        rt_log("GTA2_KEYS: %s key %02X at %llu ms", k->down ? "press" : "release", k->mac, (unsigned long long)t);
+        key_transition(hwnd, k->mac, k->down, 0, k->down && k->mac == 0x24 ? @"\r" : nil);
     }
 }
 
@@ -216,6 +276,7 @@ void user32_init(void)
         [NSApp finishLaunching];
         [NSApp activateIgnoringOtherApps:YES];
     }
+    script_load();
     g_app_ready = 1;
 }
 
@@ -230,6 +291,7 @@ static void pump_appkit(void)
             [NSApp sendEvent:e];
         }
     }
+    script_run();
     uint64_t t = now_ms();
     for (int i = 0; i < MAX_TIMERS; i++) {
         Timer *tm = &g_timers[i];

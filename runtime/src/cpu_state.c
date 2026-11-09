@@ -96,8 +96,8 @@ void recomp_icall_fail_log(uint32_t va)
         if (g_misses[i] == va) return;
     rt_log("icall: no function at %08X", va);
     if (g_nmisses < MAX_MISSES) {
-        if (!g_nmisses) atexit(save_misses);
         g_misses[g_nmisses++] = va;
+        save_misses(); /* now: runs often end by signal, which skips atexit */
     }
 }
 
