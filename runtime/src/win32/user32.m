@@ -14,6 +14,7 @@
 #include "guest_call.h"
 #include "guest_memory.h"
 #include "input/dinput.h"
+#include "input/gamepad.h"
 #include "platform/keymap.h"
 #include "win32/imports.h"
 #include "win32/user32_api.h"
@@ -189,6 +190,17 @@ static void script_load(void)
     free(copy);
 }
 
+static uint32_t first_hwnd(void)
+{
+    for (int i = 0; i < MAX_WINDOWS; i++) if (g_windows[i].hwnd) return g_windows[i].hwnd;
+    return 0;
+}
+
+void user32_inject_key(unsigned mac_keycode, int down)
+{
+    key_transition(first_hwnd(), mac_keycode, down, 0, down && mac_keycode == 0x24 ? @"\r" : nil);
+}
+
 static void script_run(void)
 {
     uint64_t t = now_ms() - g_t0;
@@ -292,6 +304,7 @@ static void pump_appkit(void)
         }
     }
     script_run();
+    gamepad_poll();
     uint64_t t = now_ms();
     for (int i = 0; i < MAX_TIMERS; i++) {
         Timer *tm = &g_timers[i];
