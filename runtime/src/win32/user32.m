@@ -125,11 +125,23 @@ static uint32_t wnd_send(uint32_t hwnd, uint32_t msg, uint32_t w, uint32_t l)
 /* ---- AppKit glue -------------------------------------------------------------- */
 
 /* One key transition from any source (AppKit or the GTA2_KEYS test script). */
+void user32_update_title(void)
+{
+    for (int i = 0; i < MAX_WINDOWS; i++) {
+        if (!g_windows[i].hwnd) continue;
+        ((__bridge NSWindow *)g_windows[i].window).title =
+            world3d_enabled() ? @"GTA2 – 3D renderer (F9: original)" : @"GTA2 – original renderer (F9: 3D)";
+    }
+}
+
 static void key_transition(uint32_t hwnd, unsigned mac_keycode, int down, int repeat, NSString *chars)
 {
     uint8_t vk, dik;
     if (!keymap_from_mac(mac_keycode, &vk, &dik)) return;
-    if (vk == 0x78 /* F9 */ && down && !repeat) world3d_toggle();
+    if (vk == 0x78 /* F9 */ && down && !repeat) {
+        world3d_toggle();
+        user32_update_title();
+    }
     if (!repeat) dinput_key_event(dik, down, (uint32_t)now_ms());
     g_key_down[dik] = down ? 0x80 : 0;
     uint32_t lparam = 1u | (uint32_t)(dik & 0x7F) << 16 | (dik & 0x80 ? 1u << 24 : 0) |
@@ -433,6 +445,7 @@ static void CreateWindowExA(void)
         win->delegate = (void *)CFBridgingRetain(del);
     }
     rt_log("CreateWindowExA(%s, %dx%d) -> %08X", cname, w, h, win->hwnd);
+    user32_update_title();
 
     /* WM_NCCREATE / WM_CREATE with a CREATESTRUCTA in guest memory */
     uint32_t cs = guest_alloc(48, 1);

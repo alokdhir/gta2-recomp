@@ -9,3 +9,6 @@ void user32_set_client_size(uint32_t hwnd, int width, int height);
 
 /* Press/release a key as if typed (macOS key code); used by the gamepad mapper. */
 void user32_inject_key(unsigned mac_keycode, int down);
+
+/* Window title shows which renderer is active. */
+void user32_update_title(void);
