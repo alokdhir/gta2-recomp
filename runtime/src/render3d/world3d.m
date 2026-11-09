@@ -549,6 +549,16 @@ static id<MTLRenderPipelineState> g_spr_pipe[3];
 static id<MTLSamplerState> g_spr_samp;
 static id<MTLTexture> g_tiles;
 static id<MTLSamplerState> g_samp;
+/* sky-light shadow map */
+static id<MTLRenderPipelineState> g_sh_pipe;
+static id<MTLDepthStencilState> g_sh_depth;
+static id<MTLSamplerState> g_sh_cmp;
+static id<MTLTexture> g_shmap;
+static int g_shadows = -1; /* GTA2_NO_SHADOWS=1 to compare */
+typedef struct { float centre[4], r[4], u[4], f[4], lo[4], inv[4]; } SunU;
+static SunU g_sun;
+static int g_mesh_ready; /* mesh built by the prepass for this frame */
+static id<MTLBuffer> g_mesh_buf;
 static char g_tiles_for[1024];
 
 static NSString *const kShaders =
@@ -556,7 +566,7 @@ static NSString *const kShaders =
      "using namespace metal;\n"
      "struct WVert { packed_float3 p; packed_float2 uv; float layer; float shade; packed_float2 uv2; float layer2; };\n"
      "struct Cam { float4 fit; float2 screen; float2 centre; packed_float3 cam; float f; float near_d; float far_d;\n"
-     "             float ambient; int nlights; int emissive; };\n"
+     "             float ambient; int nlights; int emissive; int shadows; };\n"
      "struct Light { packed_float3 p; float radius; float radius2; float intensity; packed_float3 rgb; };\n"
      "struct VOut { float4 pos [[position]]; float2 uv; float layer [[flat]]; float shade; float3 world;\n"
      "              float2 uv2; float layer2 [[flat]]; };\n"
@@ -579,14 +589,42 @@ static NSString *const kShaders =
      "    o.layer2 = in.layer2;\n"
      "    return o;\n"
      "}\n"
+     /* Sky-light shadow map: orthographic, fitted to the region each frame. */
+     "struct Sun { float3 centre; float3 r; float3 u; float3 f; float4 lo; float4 inv; };\n"
+     "float3 sun_ndc(float3 p, constant Sun &s) {\n"
+     "    float3 d = p - s.centre;\n"
+     "    float3 l = float3(dot(d, s.r), dot(d, s.u), dot(d, s.f));\n"
+     "    return (l - s.lo.xyz) * s.inv.xyz;\n"      /* 0..1 in all three */
+     "}\n"
+     "struct ShOut { float4 pos [[position]]; float2 uv; float layer [[flat]]; };\n"
+     "vertex ShOut sh_vs(uint vid [[vertex_id]], const device WVert *v [[buffer(0)]], constant Sun &s [[buffer(1)]]) {\n"
+     "    WVert in = v[vid];\n"
+     "    float3 n = sun_ndc(float3(in.p), s);\n"
+     "    ShOut o; o.pos = float4(n.xy * 2 - 1, n.z, 1); o.uv = float2(in.uv); o.layer = in.layer; return o;\n"
+     "}\n"
+     "fragment void sh_fs(ShOut in [[stage_in]], texture2d_array<float> t [[texture(0)]], sampler sm [[sampler(0)]]) {\n"
+     "    if (t.sample(sm, in.uv, uint(in.layer)).a < 0.5) discard_fragment();\n"
+     "}\n"
+     "float sun_vis(float3 p, constant Sun &s, depth2d<float> sm, sampler cmp) {\n"
+     "    float3 n = sun_ndc(p, s);\n"
+     "    if (any(n < 0.0) || any(n > 1.0)) return 1.0;\n"
+     "    float2 uv = float2(n.x, 1.0 - n.y);\n"
+     "    float2 px = 1.0 / float2(sm.get_width(), sm.get_height());\n"
+     "    float v = 0;\n"
+     "    for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++)\n"
+     "        v += sm.sample_compare(cmp, uv + float2(x, y) * px, n.z - 0.0025);\n"
+     "    return v / 9.0;\n"
+     "}\n"
      /* Lighting, per pixel, following the original renderer's rule: at full
       * ambient (daylight) only the face's directional shade applies; below
       * it, ambient + shade^2 * sum(light falloff * intensity * colour). */
      "fragment float4 w_fs(VOut in [[stage_in]], bool front [[front_facing]], texture2d_array<float> t [[texture(0)]],\n"
-     "                     sampler s [[sampler(0)]], constant Cam &c [[buffer(1)]], const device Light *lights [[buffer(2)]]) {\n"
+     "                     sampler s [[sampler(0)]], constant Cam &c [[buffer(1)]], const device Light *lights [[buffer(2)]],\n"
+     "                     constant Sun &sun [[buffer(3)]], depth2d<float> smap [[texture(1)]], sampler cmp [[sampler(1)]]) {\n"
      "    float4 tex = front ? t.sample(s, in.uv, uint(in.layer)) : t.sample(s, in.uv2, uint(in.layer2));\n"
      "    if (tex.a < 0.5) discard_fragment();\n"
-     "    if (c.ambient >= 255.0) return float4(tex.rgb * in.shade, 1);\n"
+     "    float vis = c.shadows != 0 ? sun_vis(in.world, sun, smap, cmp) : 1.0;\n"
+     "    if (c.ambient >= 255.0) return float4(tex.rgb * in.shade * (0.58 + 0.42 * vis), 1);\n"
      "    float3 sum = float3(0);\n"
      "    for (int i = 0; i < c.nlights; i++) {\n"
      "        float3 dv = in.world - float3(lights[i].p);\n"
@@ -595,7 +633,7 @@ static NSString *const kShaders =
      "        float f = (lights[i].radius - sqrt(d2)) / lights[i].radius;\n"
      "        sum += max(f, 0.0) * lights[i].intensity * float3(lights[i].rgb);\n"
      "    }\n"
-     "    float3 l = in.shade * in.shade * sum + c.ambient / 255.0;\n"
+     "    float3 l = in.shade * in.shade * sum + c.ambient / 255.0 * (0.45 + 0.55 * vis);\n"
      "    float3 lit = tex.rgb * min(l, float3(1.0));\n"
      /* Self-lit texels (neon tubes, signal lamps): very bright and strongly
       * saturated ones keep their own colour in the dark, so bloom finds them.
@@ -736,6 +774,27 @@ static int setup(void)
     sd.mipFilter = MTLSamplerMipFilterLinear;
     sd.sAddressMode = sd.tAddressMode = MTLSamplerAddressModeClampToEdge;
     g_samp = [dev newSamplerStateWithDescriptor:sd];
+
+    MTLRenderPipelineDescriptor *shd = [MTLRenderPipelineDescriptor new];
+    shd.vertexFunction = [lib newFunctionWithName:@"sh_vs"];
+    shd.fragmentFunction = [lib newFunctionWithName:@"sh_fs"];
+    shd.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
+    g_sh_pipe = [dev newRenderPipelineStateWithDescriptor:shd error:&err];
+    if (!g_sh_pipe) rt_log("world3d: shadow pipeline failed: %s", err.localizedDescription.UTF8String);
+    MTLDepthStencilDescriptor *sdd = [MTLDepthStencilDescriptor new];
+    sdd.depthCompareFunction = MTLCompareFunctionLess;
+    sdd.depthWriteEnabled = YES;
+    g_sh_depth = [dev newDepthStencilStateWithDescriptor:sdd];
+    MTLSamplerDescriptor *cd = [MTLSamplerDescriptor new];
+    cd.minFilter = cd.magFilter = MTLSamplerMinMagFilterLinear;
+    cd.sAddressMode = cd.tAddressMode = MTLSamplerAddressModeClampToEdge;
+    cd.compareFunction = MTLCompareFunctionLessEqual;
+    g_sh_cmp = [dev newSamplerStateWithDescriptor:cd];
+    MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float
+                                                                                  width:2048 height:2048 mipmapped:NO];
+    td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+    td.storageMode = MTLStorageModePrivate;
+    g_shmap = [dev newTextureWithDescriptor:td];
     return 1;
 }
 
@@ -815,23 +874,79 @@ static void debug_blocks(const WorldMap *m)
     free(copy);
 }
 
-void world3d_draw(id<MTLRenderCommandEncoder> enc, const float fit[4])
+static void v3norm(float v[3])
 {
-    static int env;
-    if (!env++) g_halos = getenv("GTA2_NO_HALOS") == NULL;
+    float l = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    v[0] /= l, v[1] /= l, v[2] /= l;
+}
+
+/* Before the main pass: build this frame's mesh, then render it from the sky
+ * light into the shadow map. The region includes a margin upwind so
+ * buildings just off screen still cast into view. */
+static void world3d_prepass(id<MTLCommandBuffer> cb)
+{
+    g_mesh_ready = 0;
     if (!world3d_enabled() || !g_cam.valid || !setup() || !ensure_tiles()) return;
     WorldMap m;
     if (!world_map_live(&m)) return;
     debug_blocks(&m);
-
-    /* Region: what the camera sees at ground level and below, plus a margin
-     * for buildings leaning into view. */
     float reach_x = (g_screen[0] * 0.5f) * (g_cam.camz) / g_cam.f + 3.0f;
     float reach_y = (g_screen[1] * 0.5f) * (g_cam.camz) / g_cam.f + 3.0f;
-    int x0 = (int)floorf(g_cam.camx - reach_x), x1 = (int)ceilf(g_cam.camx + reach_x);
-    int y0 = (int)floorf(g_cam.camy - reach_y), y1 = (int)ceilf(g_cam.camy + reach_y);
+    int x0 = (int)floorf(g_cam.camx - reach_x) - 4, x1 = (int)ceilf(g_cam.camx + reach_x);
+    int y0 = (int)floorf(g_cam.camy - reach_y) - 4, y1 = (int)ceilf(g_cam.camy + reach_y);
     build_mesh(&m, x0, y0, x1, y1);
     if (!g_nmesh) return;
+    g_mesh_buf = [presenter_device() newBufferWithBytes:g_mesh
+                                                 length:sizeof *g_mesh * (size_t)g_nmesh
+                                                options:MTLResourceStorageModeShared];
+    g_mesh_ready = 1;
+
+    if (g_shadows < 0) g_shadows = getenv("GTA2_NO_SHADOWS") == NULL;
+    if (!g_shadows || !g_sh_pipe || !g_shmap) return;
+    /* sky light from the north-west, high: x east, y south, z up */
+    float f[3] = { 0.42f, 0.55f, -1.0f }, up[3] = { 0, 0, 1 }, r[3], u[3];
+    v3norm(f);
+    r[0] = f[1] * up[2] - f[2] * up[1], r[1] = f[2] * up[0] - f[0] * up[2], r[2] = f[0] * up[1] - f[1] * up[0];
+    v3norm(r);
+    u[0] = r[1] * f[2] - r[2] * f[1], u[1] = r[2] * f[0] - r[0] * f[2], u[2] = r[0] * f[1] - r[1] * f[0];
+    float c[3] = { (x0 + x1) * 0.5f, (y0 + y1) * 0.5f, 4.0f };
+    float lo[3] = { 1e9f, 1e9f, 1e9f }, hi[3] = { -1e9f, -1e9f, -1e9f };
+    for (int i = 0; i < 8; i++) {
+        float p[3] = { (float)((i & 1) ? x1 + 1 : x0) - c[0], (float)((i & 2) ? y1 + 1 : y0) - c[1],
+                       (i & 4) ? 8.0f - c[2] : -c[2] };
+        float l[3] = { p[0] * r[0] + p[1] * r[1] + p[2] * r[2], p[0] * u[0] + p[1] * u[1] + p[2] * u[2],
+                       p[0] * f[0] + p[1] * f[1] + p[2] * f[2] };
+        for (int k = 0; k < 3; k++) lo[k] = fminf(lo[k], l[k]), hi[k] = fmaxf(hi[k], l[k]);
+    }
+    for (int k = 0; k < 3; k++) {
+        g_sun.centre[k] = c[k], g_sun.r[k] = r[k], g_sun.u[k] = u[k], g_sun.f[k] = f[k];
+        g_sun.lo[k] = lo[k], g_sun.inv[k] = 1.0f / (hi[k] - lo[k]);
+    }
+    MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+    rp.depthAttachment.texture = g_shmap;
+    rp.depthAttachment.loadAction = MTLLoadActionClear;
+    rp.depthAttachment.clearDepth = 1.0;
+    rp.depthAttachment.storeAction = MTLStoreActionStore;
+    id<MTLRenderCommandEncoder> e = [cb renderCommandEncoderWithDescriptor:rp];
+    [e setRenderPipelineState:g_sh_pipe];
+    [e setDepthStencilState:g_sh_depth];
+    [e setCullMode:MTLCullModeNone];
+    [e setDepthBias:0.0005f slopeScale:1.5f clamp:0.01f];
+    [e setVertexBuffer:g_mesh_buf offset:0 atIndex:0];
+    [e setVertexBytes:&g_sun length:sizeof g_sun atIndex:1];
+    [e setFragmentTexture:g_tiles atIndex:0];
+    [e setFragmentSamplerState:g_samp atIndex:0];
+    [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:(NSUInteger)g_nmesh];
+    [e endEncoding];
+}
+
+void world3d_install_prepass(void) { presenter_set_prepass(world3d_prepass); }
+
+void world3d_draw(id<MTLRenderCommandEncoder> enc, const float fit[4])
+{
+    static int env;
+    if (!env++) g_halos = getenv("GTA2_NO_HALOS") == NULL;
+    if (!g_mesh_ready || !g_nmesh) return;
 
     struct {
         float fit[4];
@@ -841,6 +956,7 @@ void world3d_draw(id<MTLRenderCommandEncoder> enc, const float fit[4])
         float ambient;
         int32_t nlights;
         int32_t emissive;
+        int32_t shadows;
     } u;
     memcpy(u.fit, fit, sizeof u.fit);
     u.screen[0] = g_screen[0];
@@ -859,16 +975,18 @@ void world3d_draw(id<MTLRenderCommandEncoder> enc, const float fit[4])
     static int emis = -1;
     if (emis < 0) emis = getenv("GTA2_NO_EMISSIVE") == NULL;
     u.emissive = emis;
+    u.shadows = g_shadows > 0 && g_sh_pipe;
     /* Light: packed float3 position, radius, radius2, intensity, packed float3 colour = 36 bytes,
      * the same as GameLight's field order. */
     id<MTLBuffer> lb = [presenter_device() newBufferWithBytes:u.nlights ? (const void *)gl : (const void *)&u
                                                        length:u.nlights ? sizeof(GameLight) * (size_t)u.nlights : 16
                                                       options:MTLResourceStorageModeShared];
 
-    id<MTLBuffer> vb = [presenter_device() newBufferWithBytes:g_mesh
-                                                       length:sizeof *g_mesh * (size_t)g_nmesh
-                                                      options:MTLResourceStorageModeShared];
+    id<MTLBuffer> vb = g_mesh_buf;
     [enc setRenderPipelineState:g_pipe];
+    [enc setFragmentBytes:&g_sun length:sizeof g_sun atIndex:3];
+    [enc setFragmentTexture:g_shmap atIndex:1];
+    [enc setFragmentSamplerState:g_sh_cmp atIndex:1];
     [enc setDepthStencilState:g_depth_on];
     [enc setCullMode:MTLCullModeNone];
     [enc setVertexBuffer:vb offset:0 atIndex:0];

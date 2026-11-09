@@ -21,6 +21,8 @@ static id<MTLRenderPipelineState> g_bright, g_blurH, g_blurV, g_compose;
 static id<MTLSamplerState> g_linear;
 static int g_bloom_on = -1; /* GTA2_NO_BLOOM=1 to compare */
 static int g_phase = PHASE_ALL;
+static PresenterPrepassFn g_prepass;
+void presenter_set_prepass(PresenterPrepassFn fn) { g_prepass = fn; }
 int presenter_phase(void) { return g_phase; }
 static CAMetalLayer *g_layer;
 static int g_w, g_h;
@@ -222,6 +224,7 @@ void presenter_frame(const void *fb, uint32_t pitch, PresenterSceneFn scene, voi
         rp.depthAttachment.storeAction = MTLStoreActionDontCare;
 
         id<MTLCommandBuffer> cb = [g_queue commandBuffer];
+        if (g_prepass) g_prepass(cb);
         id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
 
         /* Aspect-fit the game's resolution into the drawable (letterbox) */

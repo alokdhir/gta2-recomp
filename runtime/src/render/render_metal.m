@@ -219,4 +219,5 @@ void render_install(void)
 {
     if (!g_pipe[0]) setup();
     video_set_scene(draw_scene, NULL);
+    world3d_install_prepass();
 }

@@ -24,6 +24,9 @@ void world3d_sprite(const WSpriteVert q[4], int tex, int blend);
 
 /* Screen pixel -> world x,y on the plane at height z, with the fitted camera.
  * Returns 0 before the first fit. */
+/* Hook the shadow/mesh prepass into the presenter (once at startup). */
+void world3d_install_prepass(void);
+
 int world3d_unproject(float sx, float sy, float z, float *wx, float *wy);
 /* Screen pixel + the game's 1/depth -> world position (x, y, z). */
 int world3d_unproject_zf(float sx, float sy, float zf, float out[3]);

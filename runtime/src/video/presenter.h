@@ -28,6 +28,12 @@ void presenter_fit_rect(float out[4]);
 enum { PHASE_ALL = 0, PHASE_WORLD = 1, PHASE_OVERLAY = 2 };
 int presenter_phase(void);
 #ifdef __OBJC__
+/* Called each frame with the frame's command buffer before the main pass
+ * (e.g. to render a shadow map that the main pass then samples). */
+typedef void (*PresenterPrepassFn)(id<MTLCommandBuffer> cb);
+void presenter_set_prepass(PresenterPrepassFn fn);
+#endif
+#ifdef __OBJC__
 id<MTLDevice> presenter_device(void);
 #endif
 
