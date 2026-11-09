@@ -159,10 +159,13 @@ void world3d_begin_frame(float w, float h)
 
 /* End of the game's scene: solve this frame's camera now, so the world, the
  * sprites and the screen-placed quads (shadows) all use the same camera. */
+static void sprites_fit_slopes(void);
+
 void world3d_end_scene(void)
 {
     fit_solve();
     sprites_place_screen();
+    sprites_fit_slopes();
 }
 
 /* ---- mesh ------------------------------------------------------------------------- */
@@ -592,6 +595,41 @@ static void sprites_place_screen(void)
             v->z = bad ? -1000.0f : w[k][2] + g_svlift[q + k];
             g_svlift[q + k] = -1.0f;
         }
+    }
+}
+
+/* Sprites are flat cards at the height the game gives (the ped's or car's
+ * centre). On a ramp the uphill half of the card would sink into the slope
+ * and be hidden by the depth test (a ped "clipping into the stairs"), so
+ * raise each vertex to the ramp surface under it. Only ramps, and only by
+ * less than a block: walls and floors above still hide sprites as before. */
+static float ramp_surface(const WorldMap *m, float x, float y, float z)
+{
+    int bx = (int)floorf(x), by = (int)floorf(y), lz = (int)floorf(z);
+    float fx = x - (float)bx, fy = y - (float)by, best = -1e9f;
+    for (int L = lz; L >= lz - 1 && L >= 0; L--) {
+        const GBlock *b = world_map_block(m, bx, by, L);
+        float h[4]; /* NW NE SE SW; y grows to the south */
+        if (!b) continue;
+        if (ramp_heights(b->slope >> 2, h)) {
+            float n = h[0] + (h[1] - h[0]) * fx, so = h[3] + (h[2] - h[3]) * fx;
+            best = fmaxf(best, (float)L + n + (so - n) * fy);
+        } else if (L < lz && FACE_TILE(b->lid)) {
+            best = fmaxf(best, (float)L + 1.0f); /* flat ground past the top of a ramp */
+        }
+    }
+    return best;
+}
+
+static void sprites_fit_slopes(void)
+{
+    WorldMap m;
+    if (!g_nsv || !world_map_live(&m)) return;
+    for (int i = 0; i < g_nsv; i++) {
+        SVert *v = &g_sv[i];
+        if (v->x < -100.0f) continue; /* collapsed */
+        float g = ramp_surface(&m, v->x, v->y, v->z);
+        if (g > v->z && g - v->z < 0.75f) v->z = g + 0.01f;
     }
 }
 
