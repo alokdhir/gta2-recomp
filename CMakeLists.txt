@@ -18,7 +18,15 @@ target_compile_options(gta2_game PRIVATE -w -O1 -fno-strict-aliasing)
 # Any direct-call target the disassembler still missed logs when it is hit.
 target_compile_options(gta2_game PRIVATE -include ${CMAKE_SOURCE_DIR}/runtime/include/recomp_stub_hook.h)
 
+# App icon: mac/icon.png -> GTA2.icns in the bundle's Resources.
+set(ICNS ${CMAKE_BINARY_DIR}/GTA2.icns)
+add_custom_command(OUTPUT ${ICNS}
+  COMMAND ${CMAKE_SOURCE_DIR}/mac/make_icns.sh ${CMAKE_SOURCE_DIR}/mac/icon.png ${ICNS}
+  DEPENDS ${CMAKE_SOURCE_DIR}/mac/icon.png ${CMAKE_SOURCE_DIR}/mac/make_icns.sh)
+set_source_files_properties(${ICNS} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+
 add_executable(gta2 MACOSX_BUNDLE
+  ${ICNS}
   runtime/src/main.c
   runtime/src/cpu_state.c
   runtime/src/guest_memory.c
