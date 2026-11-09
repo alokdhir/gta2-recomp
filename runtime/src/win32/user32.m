@@ -16,6 +16,7 @@
 #include "guest_memory.h"
 #include "input/dinput.h"
 #include "input/gamepad.h"
+#include "render3d/world3d.h"
 #include "platform/keymap.h"
 #include "win32/imports.h"
 #include "win32/user32_api.h"
@@ -128,6 +129,7 @@ static void key_transition(uint32_t hwnd, unsigned mac_keycode, int down, int re
 {
     uint8_t vk, dik;
     if (!keymap_from_mac(mac_keycode, &vk, &dik)) return;
+    if (vk == 0x78 /* F9 */ && down && !repeat) world3d_toggle();
     if (!repeat) dinput_key_event(dik, down, (uint32_t)now_ms());
     g_key_down[dik] = down ? 0x80 : 0;
     uint32_t lparam = 1u | (uint32_t)(dik & 0x7F) << 16 | (dik & 0x80 ? 1u << 24 : 0) |

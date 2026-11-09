@@ -19,6 +19,7 @@
 #include "render/render.h"
 #include "debug/watch.h"
 #include "render3d/world_data.h"
+#include "render3d/world3d.h"
 #include "win32/imports.h"
 #include "win32/modules.h"
 
@@ -231,6 +232,19 @@ static void dump_prim(uint32_t flags, uint32_t rec, uint32_t verts, unsigned n, 
     rt_log("%s", line);
 }
 
+/* Map primitives (tiles, partial-block triangles) carry the world position of
+ * each vertex at +0x80: feed the 3D camera fit, and in 3D mode don't draw them. */
+static int map_prim(uint32_t verts, unsigned n)
+{
+    for (unsigned i = 0; i < n; i++) {
+        float sv[3], wv[3];
+        memcpy(sv, GPTR(verts + 32u * i), 12);
+        memcpy(wv, GPTR(verts + 0x80u + 32u * i), 12);
+        world3d_observe(sv[0], sv[1], sv[2], wv[0], wv[1], wv[2]);
+    }
+    return world3d_enabled();
+}
+
 static void emit(uint32_t flags, uint32_t rec, uint32_t verts, unsigned n, uint8_t shade)
 {
     if (!verts) return;
@@ -326,21 +340,11 @@ static void tile_uvs(uint32_t flags, uint32_t verts)
 
 static void gbh_DrawTile(void)
 {
-    static int probe;
-    if (getenv("GTA2_PROBE_WORLD") && probe < 6 && ARG(2)) { /* TEMPORARY: screen vs world per vertex */
-        probe++;
-        for (uint32_t i = 0; i < 4; i++) {
-            float sv[8], wv[3];
-            memcpy(sv, GPTR(ARG(2) + 32u * i), 32);
-            memcpy(wv, GPTR(ARG(2) + 0x80u + 32u * i), 12);
-            rt_log("probe v%u screen %.1f,%.1f zf=%.5f | world %.3f,%.3f,%.3f", i, sv[0], sv[1], sv[2], wv[0], wv[1], wv[2]);
-        }
-    }
     g_tiles_this_scene++;
     g_draw_kind = "tile";
     g_draw_ret = MEM32(g_esp);
     if (ARG(2)) tile_uvs(ARG(0), ARG(2));
-    emit(ARG(0), ARG(1), ARG(2), 4, (uint8_t)ARG(3));
+    if (!(ARG(2) && map_prim(ARG(2), 4))) emit(ARG(0), ARG(1), ARG(2), 4, (uint8_t)ARG(3));
     RETURN_STDCALL(0, 4);
 }
 
@@ -348,10 +352,15 @@ static void gbh_DrawTilePart(void)
 {
     g_draw_kind = "tilep";
     if (ARG(2)) tile_uvs(ARG(0), ARG(2));
-    emit(ARG(0), ARG(1), ARG(2), 4, (uint8_t)ARG(3));
+    if (!(ARG(2) && map_prim(ARG(2), 4))) emit(ARG(0), ARG(1), ARG(2), 4, (uint8_t)ARG(3));
     RETURN_STDCALL(0, 4);
 }
-static void gbh_DrawTriangle(void) { g_draw_kind = "tri"; emit(ARG(0), ARG(1), ARG(2), 3, (uint8_t)ARG(3)); RETURN_STDCALL(0, 4); }
+static void gbh_DrawTriangle(void)
+{
+    g_draw_kind = "tri";
+    if (!(ARG(2) && map_prim(ARG(2), 3))) emit(ARG(0), ARG(1), ARG(2), 3, (uint8_t)ARG(3));
+    RETURN_STDCALL(0, 4);
+}
 
 static void solid_rect(float x0, float y0, float x1, float y1, uint32_t argb)
 {
@@ -554,6 +563,7 @@ static void gbh_BeginScene(void)
     g_frame++;
     watch_rearm();
     world_debug_dump();
+    world3d_begin_frame(g_screen_w, g_screen_h);
     if (g_frame % 100 == 0) rt_log("scene %u", g_frame);
     render_begin_frame();
     RETURN_STDCALL(0, 0);

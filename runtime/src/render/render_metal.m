@@ -3,6 +3,7 @@
 
 #include "render/render.h"
 #include "video/video.h"
+#include "render3d/world3d.h"
 #include "win32/imports.h"
 
 #define MAX_TEXTURES 16384
@@ -13,6 +14,7 @@ static int g_nfree, g_next_id;
 static id<MTLTexture> g_white;
 static id<MTLRenderPipelineState> g_pipe[3]; /* indexed by RBlend */
 static id<MTLSamplerState> g_samp[2];        /* 0 linear, 1 nearest */
+static id<MTLDepthStencilState> g_nodepth;   /* 2D: never tested, never written */
 
 typedef struct {
     int first, count, tex;
@@ -69,6 +71,7 @@ static void setup(void)
         pd.fragmentFunction = [lib newFunctionWithName:frag[i]];
         MTLRenderPipelineColorAttachmentDescriptor *ca = pd.colorAttachments[0];
         ca.pixelFormat = MTLPixelFormatBGRA8Unorm;
+        pd.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
         if (i == RB_ALPHA) {
             ca.blendingEnabled = YES;
             ca.sourceRGBBlendFactor = ca.sourceAlphaBlendFactor = MTLBlendFactorSourceAlpha;
@@ -87,6 +90,10 @@ static void setup(void)
         sd.sAddressMode = sd.tAddressMode = MTLSamplerAddressModeClampToEdge;
         g_samp[i] = [dev newSamplerStateWithDescriptor:sd];
     }
+    MTLDepthStencilDescriptor *dsd = [MTLDepthStencilDescriptor new];
+    dsd.depthCompareFunction = MTLCompareFunctionAlways;
+    dsd.depthWriteEnabled = NO;
+    g_nodepth = [dev newDepthStencilStateWithDescriptor:dsd];
     MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
                                                                                   width:1 height:1 mipmapped:NO];
     g_white = [dev newTextureWithDescriptor:td];
@@ -175,9 +182,11 @@ void render_triangles(const RVert *v, int count, int tex, RBlend blend, int poin
 static void draw_scene(id<MTLRenderCommandEncoder> enc, void *ctx)
 {
     (void)ctx;
-    if (!g_nbatches) return;
     struct { float fit[4]; float screen[2]; float pad[2]; } u;
     presenter_fit_rect(u.fit);
+    world3d_draw(enc, u.fit);
+    [enc setDepthStencilState:g_nodepth];
+    if (!g_nbatches) return;
     u.screen[0] = g_screen[0];
     u.screen[1] = g_screen[1];
     id<MTLBuffer> vb = [presenter_device() newBufferWithBytes:g_verts

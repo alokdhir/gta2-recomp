@@ -13,6 +13,7 @@ static id<MTLCommandQueue> g_queue;
 static id<MTLRenderPipelineState> g_blit;
 static id<MTLSamplerState> g_nearest;
 static id<MTLTexture> g_fbtex;
+static id<MTLTexture> g_depth; /* depth buffer for the 3D world, sized to the drawable */
 static CAMetalLayer *g_layer;
 static int g_w, g_h;
 static unsigned g_frame_no;
@@ -74,6 +75,7 @@ int presenter_init(void *metal_layer, int width, int height)
         pd.fragmentFunction = [lib newFunctionWithName:@"blit_fs"];
         pd.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
         pd.colorAttachments[0].blendingEnabled = NO;
+        pd.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
         g_blit = [g_dev newRenderPipelineStateWithDescriptor:pd error:&err];
         if (!g_blit) rt_fatal("Metal pipeline failed: %s", err.localizedDescription.UTF8String);
         MTLSamplerDescriptor *sd = [MTLSamplerDescriptor new];
@@ -138,6 +140,19 @@ void presenter_frame(const void *fb, uint32_t pitch, PresenterSceneFn scene, voi
         rp.colorAttachments[0].loadAction = MTLLoadActionClear;
         rp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
         rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+        if (!g_depth || g_depth.width != drawable.texture.width || g_depth.height != drawable.texture.height) {
+            MTLTextureDescriptor *dd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float
+                                                                                          width:drawable.texture.width
+                                                                                         height:drawable.texture.height
+                                                                                      mipmapped:NO];
+            dd.usage = MTLTextureUsageRenderTarget;
+            dd.storageMode = MTLStorageModePrivate;
+            g_depth = [g_dev newTextureWithDescriptor:dd];
+        }
+        rp.depthAttachment.texture = g_depth;
+        rp.depthAttachment.loadAction = MTLLoadActionClear;
+        rp.depthAttachment.clearDepth = 1.0;
+        rp.depthAttachment.storeAction = MTLStoreActionDontCare;
 
         id<MTLCommandBuffer> cb = [g_queue commandBuffer];
         id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
