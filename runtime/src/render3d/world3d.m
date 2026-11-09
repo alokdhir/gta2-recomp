@@ -23,6 +23,7 @@
 /* ---- toggle ------------------------------------------------------------------ */
 
 static int g_enabled = -1;
+static int g_halos = 1; /* GTA2_NO_HALOS=1 to compare */
 
 int world3d_enabled(void)
 {
@@ -380,6 +381,8 @@ static void build_mesh(const WorldMap *m, int x0, int y0, int x1, int y1)
 
 static id<MTLRenderPipelineState> g_pipe;
 static id<MTLDepthStencilState> g_depth_on;
+static id<MTLRenderPipelineState> g_halo_pipe;
+static id<MTLDepthStencilState> g_depth_test_nowrite;
 static id<MTLTexture> g_tiles;
 static id<MTLSamplerState> g_samp;
 static char g_tiles_for[1024];
@@ -430,6 +433,34 @@ static NSString *const kShaders =
      "    }\n"
      "    float3 l = in.shade * in.shade * sum + c.ambient / 255.0;\n"
      "    return float4(tex.rgb * min(l, float3(1.0)), 1);\n"
+     "}\n"
+     /* Light halos: a soft additive disc on the ground plane at each light,
+      * instanced, projected with the same camera. */
+     "struct HOut { float4 pos [[position]]; float2 q; float3 col; };\n"
+     "vertex HOut h_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant Cam &c [[buffer(1)]],\n"
+     "                 const device Light *lights [[buffer(2)]]) {\n"
+     "    const float2 corner[6] = { float2(-1,-1), float2(1,-1), float2(1,1), float2(-1,-1), float2(1,1), float2(-1,1) };\n"
+     "    Light L = lights[iid];\n"
+     "    float2 q = corner[vid];\n"
+     "    float size = L.radius * 0.38;\n"
+     "    float3 p = float3(L.p) + float3(q * size, 0.02);\n"
+     "    float3 cam = float3(c.cam);\n"
+     "    float d = max(cam.z - p.z, 0.05);\n"
+     "    float2 s = c.centre + c.f * (p.xy - cam.xy) / d;\n"
+     "    float2 t = s / c.screen;\n"
+     "    float2 ndc = float2(mix(c.fit.x, c.fit.z, t.x), mix(c.fit.w, c.fit.y, t.y));\n"
+     "    float z01 = clamp((d - c.near_d) / (c.far_d - c.near_d), 0.0, 1.0);\n"
+     "    HOut o;\n"
+     "    o.pos = float4(ndc * d, z01 * d, d);\n"
+     "    o.q = q;\n"
+     "    float night = clamp(1.0 - c.ambient / 255.0, 0.0, 1.0);\n"
+     "    o.col = float3(L.rgb) * L.intensity * night * 0.28;\n"
+     "    return o;\n"
+     "}\n"
+     "fragment float4 h_fs(HOut in [[stage_in]]) {\n"
+     "    float r2 = dot(in.q, in.q);\n"
+     "    float a = exp(-3.5 * r2) * (1.0 - smoothstep(0.85, 1.0, r2));\n"
+     "    return float4(in.col * a, 0);\n"
      "}\n";
 
 static int setup(void)
@@ -453,6 +484,22 @@ static int setup(void)
         rt_log("world3d: pipeline failed: %s", err.localizedDescription.UTF8String);
         return 0;
     }
+    MTLRenderPipelineDescriptor *hd = [MTLRenderPipelineDescriptor new];
+    hd.vertexFunction = [lib newFunctionWithName:@"h_vs"];
+    hd.fragmentFunction = [lib newFunctionWithName:@"h_fs"];
+    hd.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+    hd.colorAttachments[0].blendingEnabled = YES;
+    hd.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorOne;
+    hd.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOne;
+    hd.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorZero;
+    hd.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOne;
+    hd.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
+    g_halo_pipe = [dev newRenderPipelineStateWithDescriptor:hd error:&err];
+    if (!g_halo_pipe) rt_log("world3d: halo pipeline failed: %s", err.localizedDescription.UTF8String);
+    MTLDepthStencilDescriptor *dn = [MTLDepthStencilDescriptor new];
+    dn.depthCompareFunction = MTLCompareFunctionLessEqual;
+    dn.depthWriteEnabled = NO;
+    g_depth_test_nowrite = [dev newDepthStencilStateWithDescriptor:dn];
     MTLDepthStencilDescriptor *dd = [MTLDepthStencilDescriptor new];
     dd.depthCompareFunction = MTLCompareFunctionLessEqual;
     dd.depthWriteEnabled = YES;
@@ -494,6 +541,8 @@ static int ensure_tiles(void)
 
 void world3d_draw(id<MTLRenderCommandEncoder> enc, const float fit[4])
 {
+    static int env;
+    if (!env++) g_halos = getenv("GTA2_NO_HALOS") == NULL;
     if (!world3d_enabled() || !g_cam.valid || !setup() || !ensure_tiles()) return;
     WorldMap m;
     if (!world_map_live(&m)) return;
@@ -548,5 +597,14 @@ void world3d_draw(id<MTLRenderCommandEncoder> enc, const float fit[4])
     [enc setFragmentTexture:g_tiles atIndex:0];
     [enc setFragmentSamplerState:g_samp atIndex:0];
     [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:(NSUInteger)g_nmesh];
+
+    /* light halos (dim scenes only; their strength fades in with darkness) */
+    if (g_halo_pipe && u.nlights > 0 && u.ambient < 255.0f && g_halos) {
+        [enc setRenderPipelineState:g_halo_pipe];
+        [enc setDepthStencilState:g_depth_test_nowrite];
+        [enc setVertexBytes:&u length:sizeof u atIndex:1];
+        [enc setVertexBuffer:lb offset:0 atIndex:2];
+        [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6 instanceCount:(NSUInteger)u.nlights];
+    }
 }
 
