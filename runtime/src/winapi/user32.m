@@ -1044,13 +1044,12 @@ static void ShellExecuteA(void)
 {
     const char *file = ARG(2) ? GSTR(ARG(2)) : "";
     if (!strcasecmp(file, "GTA2 Manager.EXE")) {
+        /* The game stays in its menu after launching the manager, so restart
+         * here: the settings are already saved. Cancel just returns. */
         if (show_settings()) {
             app_request_relaunch();
-            RETURN_STDCALL(42, 6);
+            app_exit_hook(); /* execs a fresh copy; returns only if that failed */
         }
-        /* Cancelled: the game still quits after a "successful" launch, so
-         * relaunch unchanged rather than leaving the user at the desktop. */
-        app_request_relaunch();
         RETURN_STDCALL(42, 6);
     }
     rt_log("ShellExecuteA(%s): not supported", file);
