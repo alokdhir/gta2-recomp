@@ -280,7 +280,9 @@ void user32_init(void)
     if (g_app_ready) return;
     @autoreleasepool {
         [NSApplication sharedApplication];
-        [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+        /* GTA2_HEADLESS (automated test runs): no Dock icon, no focus stealing */
+        [NSApp setActivationPolicy:getenv("GTA2_HEADLESS") ? NSApplicationActivationPolicyAccessory
+                                                         : NSApplicationActivationPolicyRegular];
         NSMenu *bar = [NSMenu new];
         NSMenuItem *appItem = [NSMenuItem new];
         [bar addItem:appItem];
@@ -293,7 +295,7 @@ void user32_init(void)
         appItem.submenu = appMenu;
         NSApp.mainMenu = bar;
         [NSApp finishLaunching];
-        [NSApp activateIgnoringOtherApps:YES];
+        if (!getenv("GTA2_HEADLESS")) [NSApp activateIgnoringOtherApps:YES];
     }
     script_load();
     g_app_ready = 1;
@@ -419,6 +421,11 @@ static void CreateWindowExA(void)
         nw.delegate = del;
         [nw makeFirstResponder:view];
         [nw center];
+        if (getenv("GTA2_HEADLESS")) { /* still renders (for captures), but invisible and click-through */
+            nw.alphaValue = 0;
+            nw.ignoresMouseEvents = YES;
+            nw.level = NSNormalWindowLevel - 1;
+        }
         win->window = (void *)CFBridgingRetain(nw);
         win->view = (__bridge void *)view;
         win->delegate = (void *)CFBridgingRetain(del);
@@ -451,7 +458,8 @@ static void ShowWindow(void)
     Window *w = find_window(ARG(0));
     if (w) {
         NSWindow *nw = (__bridge NSWindow *)w->window;
-        if (ARG(1)) [nw makeKeyAndOrderFront:nil];
+        if (ARG(1) && getenv("GTA2_HEADLESS")) [nw orderBack:nil];
+        else if (ARG(1)) [nw makeKeyAndOrderFront:nil];
         else [nw orderOut:nil];
     }
     RETURN_STDCALL(1, 2);

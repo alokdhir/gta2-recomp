@@ -326,6 +326,16 @@ static void tile_uvs(uint32_t flags, uint32_t verts)
 
 static void gbh_DrawTile(void)
 {
+    static int probe;
+    if (getenv("GTA2_PROBE_WORLD") && probe < 6 && ARG(2)) { /* TEMPORARY: screen vs world per vertex */
+        probe++;
+        for (uint32_t i = 0; i < 4; i++) {
+            float sv[8], wv[3];
+            memcpy(sv, GPTR(ARG(2) + 32u * i), 32);
+            memcpy(wv, GPTR(ARG(2) + 0x80u + 32u * i), 12);
+            rt_log("probe v%u screen %.1f,%.1f zf=%.5f | world %.3f,%.3f,%.3f", i, sv[0], sv[1], sv[2], wv[0], wv[1], wv[2]);
+        }
+    }
     g_tiles_this_scene++;
     g_draw_kind = "tile";
     g_draw_ret = MEM32(g_esp);

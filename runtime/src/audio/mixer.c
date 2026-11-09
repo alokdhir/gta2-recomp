@@ -45,6 +45,7 @@ static AudioUnit g_unit;
 static int g_running, g_paused;
 static float g_master = 1.0f;
 static int g_trace;
+static int g_mute; /* GTA2_HEADLESS / GTA2_MUTE: mix as usual, output silence */
 
 /* ---- IMA ADPCM (WAV format 0x11) ----------------------------------------- */
 
@@ -181,6 +182,7 @@ static OSStatus render(void *ref, AudioUnitRenderActionFlags *flags, const Audio
         acc += (double)o[k] * o[k];
     }
     frames += nframes;
+    if (g_mute) memset(o, 0, sizeof(float) * 2 * nframes);
     if (g_trace && frames >= 2 * (uint64_t)OUT_RATE) {
         int active = 0;
         for (int i = 0; i < MAX_VOICES; i++) active += g_v[i].state == MX_PLAYING;
@@ -211,6 +213,7 @@ int mixer_init(void)
     if (AudioUnitInitialize(g_unit) != noErr || AudioOutputUnitStart(g_unit) != noErr) return 0;
     g_running = 1;
     g_trace = getenv("GTA2_TRACE_AUDIO") != NULL;
+    g_mute = getenv("GTA2_HEADLESS") != NULL || getenv("GTA2_MUTE") != NULL;
     rt_log("mixer: Core Audio output running at %.0f Hz", OUT_RATE);
     return 1;
 }
