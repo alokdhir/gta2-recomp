@@ -556,7 +556,7 @@ static NSString *const kShaders =
      "using namespace metal;\n"
      "struct WVert { packed_float3 p; packed_float2 uv; float layer; float shade; packed_float2 uv2; float layer2; };\n"
      "struct Cam { float4 fit; float2 screen; float2 centre; packed_float3 cam; float f; float near_d; float far_d;\n"
-     "             float ambient; int nlights; };\n"
+     "             float ambient; int nlights; int emissive; };\n"
      "struct Light { packed_float3 p; float radius; float radius2; float intensity; packed_float3 rgb; };\n"
      "struct VOut { float4 pos [[position]]; float2 uv; float layer [[flat]]; float shade; float3 world;\n"
      "              float2 uv2; float layer2 [[flat]]; };\n"
@@ -596,7 +596,17 @@ static NSString *const kShaders =
      "        sum += max(f, 0.0) * lights[i].intensity * float3(lights[i].rgb);\n"
      "    }\n"
      "    float3 l = in.shade * in.shade * sum + c.ambient / 255.0;\n"
-     "    return float4(tex.rgb * min(l, float3(1.0)), 1);\n"
+     "    float3 lit = tex.rgb * min(l, float3(1.0));\n"
+     /* Self-lit texels (neon tubes, signal lamps): very bright and strongly
+      * saturated ones keep their own colour in the dark, so bloom finds them.
+      * A heuristic until hand-made emissive maps exist. */
+     "    if (c.emissive != 0) {\n"
+     "        float mx = max(tex.r, max(tex.g, tex.b)), mn = min(tex.r, min(tex.g, tex.b));\n"
+     "        float sat = mx > 0.0 ? (mx - mn) / mx : 0.0;\n"
+     "        float e = smoothstep(0.70, 0.90, mx) * smoothstep(0.55, 0.80, sat);\n"
+     "        lit = max(lit, tex.rgb * e * 1.1);\n"
+     "    }\n"
+     "    return float4(lit, 1);\n"
      "}\n"
      /* Light halos: a soft additive disc on the ground plane at each light,
       * instanced, projected with the same camera. */
@@ -830,6 +840,7 @@ void world3d_draw(id<MTLRenderCommandEncoder> enc, const float fit[4])
         float near_d, far_d;
         float ambient;
         int32_t nlights;
+        int32_t emissive;
     } u;
     memcpy(u.fit, fit, sizeof u.fit);
     u.screen[0] = g_screen[0];
@@ -845,6 +856,9 @@ void world3d_draw(id<MTLRenderCommandEncoder> enc, const float fit[4])
     const GameLight *gl;
     u.nlights = render_lights(&gl);
     u.ambient = render_ambient();
+    static int emis = -1;
+    if (emis < 0) emis = getenv("GTA2_NO_EMISSIVE") == NULL;
+    u.emissive = emis;
     /* Light: packed float3 position, radius, radius2, intensity, packed float3 colour = 36 bytes,
      * the same as GameLight's field order. */
     id<MTLBuffer> lb = [presenter_device() newBufferWithBytes:u.nlights ? (const void *)gl : (const void *)&u

@@ -347,6 +347,9 @@ static int quad_3d(uint32_t flags, uint32_t rec, uint32_t verts, uint8_t shade)
         float f[8], w[3];
         memcpy(f, GPTR(verts + 32u * i), 32);
         if (!world3d_unproject_zf(f[0], f[1], f[2], w)) return 0;
+        /* placed from the previous frame's camera fit, so give them clearance:
+         * a hair under the road and the depth test hides them (popping) */
+        w[2] += 0.03f;
         uint32_t col = (flags & F_VERTEX_COLOUR) ? MEM32(verts + 32u * i + 16u) : shade_colour(shade);
         if ((flags & 0x8000u) && g_ambient != 255.0f) col = light_vertex(col, shade, w);
         q[i] = (WSpriteVert){ w[0], w[1], w[2], f[6] / tw, f[7] / th, col };
