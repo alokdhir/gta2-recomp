@@ -102,6 +102,22 @@ static int solve3(double m[3][3], const double b[3], double x[3])
 /* Called at the start of every scene: finish the previous frame's fit. */
 static void sprites_reset(void);
 
+int world3d_unproject_zf(float sx, float sy, float zf, float out[3])
+{
+    if (!g_cam.valid || zf <= 0) return 0;
+    out[2] = g_cam.camz - 1.0f / zf;
+    return world3d_unproject(sx, sy, out[2], &out[0], &out[1]);
+}
+
+int world3d_unproject(float sx, float sy, float z, float *wx, float *wy)
+{
+    if (!g_cam.valid || g_cam.f <= 0) return 0;
+    float d = g_cam.camz - z;
+    *wx = g_cam.camx + (sx - g_cam.cx) * d / g_cam.f;
+    *wy = g_cam.camy + (sy - g_cam.cy) * d / g_cam.f;
+    return 1;
+}
+
 void world3d_begin_frame(float w, float h)
 {
     sprites_reset();

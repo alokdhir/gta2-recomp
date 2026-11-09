@@ -22,6 +22,12 @@ typedef struct {
 /* blend: 0 alpha (colour-keyed), 1 additive, 2 opaque (render.h RBlend) */
 void world3d_sprite(const WSpriteVert q[4], int tex, int blend);
 
+/* Screen pixel -> world x,y on the plane at height z, with the fitted camera.
+ * Returns 0 before the first fit. */
+int world3d_unproject(float sx, float sy, float z, float *wx, float *wy);
+/* Screen pixel + the game's 1/depth -> world position (x, y, z). */
+int world3d_unproject_zf(float sx, float sy, float zf, float out[3]);
+
 #ifdef __OBJC__
 #import <Metal/Metal.h>
 /* Draw the world into the current frame (depth-tested). */

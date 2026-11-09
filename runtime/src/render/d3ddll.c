@@ -330,10 +330,36 @@ static int sprite_3d(uint32_t flags, uint32_t rec, uint32_t verts, uint8_t shade
     return 1;
 }
 
+/* Other world-space quads (shadows and effects drawn from their own vertex
+ * arrays): in 3D mode, place them from their screen position and depth so
+ * they sort into the world in draw order instead of overlaying it. The HUD
+ * (depth 0.0001) stays 2D. */
+static int quad_3d(uint32_t flags, uint32_t rec, uint32_t verts, uint8_t shade)
+{
+    if (!world3d_enabled() || (flags & F_EXPAND)) return 0;
+    float f0[8];
+    memcpy(f0, GPTR(verts), 32);
+    if (f0[2] < 0.01f) return 0; /* HUD and menus */
+    int tex = texture_for(rec);
+    float tw = rec ? (float)MEM16(rec + TEX_W) : 1, th = rec ? (float)MEM16(rec + TEX_H) : 1;
+    WSpriteVert q[4];
+    for (uint32_t i = 0; i < 4; i++) {
+        float f[8], w[3];
+        memcpy(f, GPTR(verts + 32u * i), 32);
+        if (!world3d_unproject_zf(f[0], f[1], f[2], w)) return 0;
+        uint32_t col = (flags & F_VERTEX_COLOUR) ? MEM32(verts + 32u * i + 16u) : shade_colour(shade);
+        if ((flags & 0x8000u) && g_ambient != 255.0f) col = light_vertex(col, shade, w);
+        q[i] = (WSpriteVert){ w[0], w[1], w[2], f[6] / tw, f[7] / th, col };
+    }
+    world3d_sprite(q, tex, (int)blend_for(flags));
+    return 1;
+}
+
 static void emit(uint32_t flags, uint32_t rec, uint32_t verts, unsigned n, uint8_t shade)
 {
     if (!verts) return;
     if (n == 4 && sprite_3d(flags, rec, verts, shade)) return;
+    if (n == 4 && verts != SPRITE_VERTS && quad_3d(flags, rec, verts, shade)) return;
     if (g_frame == g_dump_frame) dump_prim(flags, rec, verts, (flags & F_EXPAND) ? 1 : n, shade);
     float v0z;
     uint32_t z = MEM32(verts + 8);
