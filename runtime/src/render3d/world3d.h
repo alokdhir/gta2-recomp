@@ -5,6 +5,7 @@
 
 int world3d_enabled(void);
 void world3d_toggle(void);
+void world3d_set(int on); /* without saving the preference */
 
 /* Camera fit: every map vertex the game projects is reported with its screen
  * position, its 1/z, and the absolute world position the game stored for it.

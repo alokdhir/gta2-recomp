@@ -36,6 +36,8 @@ void world3d_toggle(void)
     rt_log("world3d: %s", g_enabled ? "3D renderer" : "original renderer");
 }
 
+void world3d_set(int on) { g_enabled = on; }
+
 /* ---- camera fit --------------------------------------------------------------- */
 
 typedef struct {

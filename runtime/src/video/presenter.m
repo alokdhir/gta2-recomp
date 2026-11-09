@@ -6,6 +6,7 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #include "video/presenter.h"
+#include "render3d/world3d.h"
 #include "win32/imports.h"
 
 static id<MTLDevice> g_dev;
@@ -87,7 +88,7 @@ int presenter_init(void *metal_layer, int width, int height)
     g_layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
     g_capture_path = getenv("GTA2_CAPTURE");
     g_capture_frame = getenv("GTA2_CAPTURE_FRAME") ? (unsigned)atoi(getenv("GTA2_CAPTURE_FRAME")) : 120;
-    g_layer.framebufferOnly = g_capture_path == NULL;
+    g_layer.framebufferOnly = g_capture_path == NULL && getenv("GTA2_AB") == NULL;
     g_layer.displaySyncEnabled = YES;
 
     if (width != g_w || height != g_h || !g_fbtex) {
@@ -175,12 +176,22 @@ void presenter_frame(const void *fb, uint32_t pitch, PresenterSceneFn scene, voi
             [enc drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
         }
         [enc endEncoding];
-        int capture = g_capture_path && ++g_frame_no == g_capture_frame;
+        /* GTA2_AB=n: frame n with the original renderer, frame n+2 in 3D, same run */
+        static int ab = -2;
+        if (ab == -2) ab = getenv("GTA2_AB") ? atoi(getenv("GTA2_AB")) : -1;
+        const char *ab_path = NULL;
+        if (!g_capture_path) g_frame_no++;
+        if (ab > 0 && (int)g_frame_no == ab - 1) world3d_set(0);
+        if (ab > 0 && (int)g_frame_no == ab) { ab_path = "ab_original.png"; world3d_set(1); }
+        if (ab > 0 && (int)g_frame_no == ab + 2) ab_path = "ab_3d.png";
+        int capture = (g_capture_path && ++g_frame_no == g_capture_frame) || ab_path;
         [cb presentDrawable:drawable];
         [cb commit];
         if (capture) {
             [cb waitUntilCompleted];
-            write_png(drawable.texture, g_capture_path);
+            char path[1100];
+            if (ab_path) snprintf(path, sizeof path, "%s/%s", getenv("GTA2_AB_DIR") ?: ".", ab_path);
+            write_png(drawable.texture, ab_path ? path : g_capture_path);
         }
     }
 }
