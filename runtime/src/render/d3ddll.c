@@ -22,6 +22,7 @@
 #include "render3d/world_data.h"
 #include "render3d/world3d.h"
 #include "render3d/upscale.h"
+#include "render3d/texpack.h"
 #include "winapi/imports.h"
 #include "winapi/modules.h"
 
@@ -59,6 +60,7 @@ typedef struct {
     uint16_t pal, rev;
     uint32_t pal_hash, pixels;
     int scale; /* upscale factor the GPU copy was built with */
+    int world; /* built for a world sprite (pack lookups apply) */
 } TexCache;
 
 #define TEXCACHE 8192
@@ -92,6 +94,10 @@ static uint32_t palette_hash(unsigned p)
 }
 
 /* Make sure the GPU copy of a texture record is current; returns its id. */
+/* Set by sprite_3d around its texture_for call: world sprites (cars, objects)
+ * may be replaced from the texture pack and are dumped by GTA2_DUMP_SPRITES. */
+static int g_tex_world;
+
 static int texture_for(uint32_t rec)
 {
     if (!rec) return -1;
@@ -103,7 +109,8 @@ static int texture_for(uint32_t rec)
     uint32_t ph = palette_hash(pal);
     /* sprites are upscaled in 3D mode only: the original renderer stays pixel-faithful */
     int scale = world3d_enabled() ? upscale_factor() : 1;
-    if (t->gpu >= 0 && t->pal == pal && t->rev == rev && t->pal_hash == ph && t->pixels == pixels && t->scale == scale)
+    if (t->gpu >= 0 && t->pal == pal && t->rev == rev && t->pal_hash == ph && t->pixels == pixels && t->scale == scale &&
+        t->world == g_tex_world)
         return t->gpu;
 
     static uint32_t rgba[256 * 256];
@@ -118,12 +125,22 @@ static int texture_for(uint32_t rec)
             rgba[y * w + x] = (c & 0x00FFFFFFu) | (idx ? 0xFF000000u : 0u);
         }
     }
-    uint32_t *up = scale > 1 ? upscale_pixels(rgba, (int)w, (int)h, scale) : NULL;
-    int uw = up ? (int)w * scale : (int)w, uh = up ? (int)h * scale : (int)h;
+    uint32_t *up = NULL;
+    int uw = (int)w, uh = (int)h;
+    if (g_tex_world && scale > 1) {
+        uint64_t hash = texpack_hash(rgba, (int)w, (int)h);
+        texpack_dump(hash, rgba, (int)w, (int)h);
+        up = texpack_sprite(hash, &uw, &uh);
+    }
+    if (!up && scale > 1) {
+        up = upscale_pixels(rgba, (int)w, (int)h, scale);
+        uw = (int)w * scale, uh = (int)h * scale;
+    }
     if (t->gpu < 0) t->gpu = render_texture_create(uw, uh);
     render_texture_upload(t->gpu, uw, uh, up ? up : rgba);
     free(up);
     t->scale = scale;
+    t->world = g_tex_world;
     t->pal = pal;
     t->rev = rev;
     t->pal_hash = ph;
@@ -312,7 +329,9 @@ static int sprite_3d(uint32_t flags, uint32_t rec, uint32_t verts, uint8_t shade
     uint32_t zb = MEM32(verts + 8);
     memcpy(&z0, &zb, 4);
     if (z0 <= 0.0f) return 1; /* behind the eye: the original drops these too */
+    g_tex_world = 1;
     int tex = texture_for(rec);
+    g_tex_world = 0;
     float tw = rec ? (float)MEM16(rec + TEX_W) : 1, th = rec ? (float)MEM16(rec + TEX_H) : 1;
     WSpriteVert q[4];
     for (uint32_t i = 0; i < 4; i++) {
@@ -340,7 +359,9 @@ static int quad_3d(uint32_t flags, uint32_t rec, uint32_t verts, uint8_t shade)
     float f0[8];
     memcpy(f0, GPTR(verts), 32);
     if (f0[2] < 0.01f) return 0; /* HUD and menus */
+    g_tex_world = 1;
     int tex = texture_for(rec);
+    g_tex_world = 0;
     float tw = rec ? (float)MEM16(rec + TEX_W) : 1, th = rec ? (float)MEM16(rec + TEX_H) : 1;
     WSpriteVert q[4];
     for (uint32_t i = 0; i < 4; i++) {

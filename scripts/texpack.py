@@ -16,6 +16,17 @@ Two stages around an external upscaler (run between them, e.g. Real-ESRGAN):
       test) and writes <pack_dir>/tiles/NNNN.png.
 
 The runtime loads <game_dir>/textures/<style name>/tiles/NNNN.png when present.
+
+Sprites (cars) are captured from the running game instead, so every colour
+remap and damage state the game produces is covered:
+
+  GTA2_DUMP_SPRITES=<dump_dir> GTA2.app ...   (drive around)
+  texpack.py sprites-prep <dump_dir> <work_dir>
+      picks car-sized sprites (people are too small to gain from AI upscaling),
+      pads them and bleeds colour into the transparent area.
+  realesrgan-ncnn-vulkan -i <work_dir>/in -o <work_dir>/out -n realesrgan-x4plus-anime -s 4
+  texpack.py sprites-finish <work_dir> <pack_dir>
+      writes <pack_dir>/sprites/<hash>.png at 4x, alpha restored.
 Needs Pillow and numpy (build-time only).
 """
 import os
@@ -107,9 +118,60 @@ def finish(sty, work, pack):
     print(f'finish: {n} tiles to {pack}/tiles ({missing} missing)')
 
 
+PAD = 8
+
+
+def is_car(w, h):
+    return max(w, h) >= 40 and min(w, h) >= 20
+
+
+def sprites_prep(dump, work):
+    os.makedirs(f'{work}/in', exist_ok=True)
+    os.makedirs(f'{work}/mask', exist_ok=True)
+    done = set(os.listdir(f'{work}/in'))
+    n = 0
+    for f in sorted(os.listdir(dump)):
+        if not f.endswith('.png'):
+            continue
+        h16, dims = f[:-4].split('_')
+        w, h = map(int, dims.split('x'))
+        if not is_car(w, h) or f'{h16}.png' in done:
+            continue
+        im = np.array(Image.open(f'{dump}/{f}').convert('RGBA'))
+        mask = im[..., 3] > 0
+        rgb = np.pad(bleed(im[..., :3], mask), ((PAD, PAD), (PAD, PAD), (0, 0)), mode='edge')
+        Image.fromarray(rgb).save(f'{work}/in/{h16}.png')
+        np.save(f'{work}/mask/{h16}.npy', mask)
+        n += 1
+    print(f'sprites-prep: {n} new car sprites in {work}/in')
+
+
+def sprites_finish(work, pack):
+    os.makedirs(f'{pack}/sprites', exist_ok=True)
+    n = 0
+    for f in sorted(os.listdir(f'{work}/in')):
+        if not f.endswith('.png') or not os.path.exists(f'{work}/out/{f}'):
+            continue
+        mask = np.load(f'{work}/mask/{f[:-4]}.npy')
+        h, w = mask.shape
+        up = Image.open(f'{work}/out/{f}').convert('RGB')
+        k = up.width // (w + 2 * PAD)
+        rgb = up.crop((PAD * k, PAD * k, (PAD + w) * k, (PAD + h) * k))
+        a = Image.fromarray((mask * 255).astype(np.uint8)).resize((w * k, h * k), Image.BILINEAR)
+        img = rgb.convert('RGBA')
+        img.putalpha(a.point(lambda v: 255 if v >= 128 else 0))
+        img.save(f'{pack}/sprites/{f}')
+        n += 1
+    print(f'sprites-finish: {n} sprites in {pack}/sprites')
+
+
 if __name__ == '__main__':
     if len(sys.argv) >= 4 and sys.argv[1] == 'prep':
         prep(sys.argv[2], sys.argv[3])
+    elif len(sys.argv) >= 4 and sys.argv[1] == 'sprites-prep':
+        sprites_prep(sys.argv[2], sys.argv[3])
+    elif len(sys.argv) >= 4 and sys.argv[1] == 'sprites-finish':
+        sprites_finish(sys.argv[2], sys.argv[3])
     elif len(sys.argv) >= 5 and sys.argv[1] == 'finish':
         finish(sys.argv[2], sys.argv[3], sys.argv[4])
     else:

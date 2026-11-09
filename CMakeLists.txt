@@ -41,6 +41,7 @@ add_executable(gta2 MACOSX_BUNDLE
   runtime/src/debug/watch.c
   runtime/src/render3d/world_data.c
   runtime/src/render3d/upscale.c
+  runtime/src/render3d/texpack.c
   runtime/src/render3d/world3d.m
   runtime/src/render/render_metal.m
   ${GEN}/imports_table.c
