@@ -32,11 +32,15 @@ add_executable(gta2
   runtime/src/video/dmavideo.c
   runtime/src/input/dinput.c
   runtime/src/video/presenter.m
+  runtime/src/render/d3ddll.c
+  runtime/src/render/render_metal.m
   ${GEN}/imports_table.c
   $<TARGET_OBJECTS:gta2_game>)
 target_include_directories(gta2 PRIVATE runtime/include runtime/src ${GEN}/gen)
 target_compile_options(gta2 PRIVATE -Wall -Wextra -Wno-unused-parameter -fno-strict-aliasing)
 set_source_files_properties(runtime/src/win32/user32.m runtime/src/video/presenter.m
+  runtime/src/render/render_metal.m
   PROPERTIES COMPILE_FLAGS -fobjc-arc)
 target_link_libraries(gta2 PRIVATE "-framework AppKit" "-framework QuartzCore" "-framework Metal"
-  "-framework CoreFoundation")
+  "-framework CoreFoundation" "-framework ImageIO" "-framework UniformTypeIdentifiers"
+  "-framework CoreGraphics")

@@ -12,6 +12,7 @@
 #include "guest_memory.h"
 #include "recomp_types.h"
 #include "video/video.h"
+void d3ddll_register(void);
 #include "win32/imports.h"
 
 recomp_func_t recomp_lookup(uint32_t va);
@@ -84,6 +85,7 @@ int main(int argc, char **argv)
     guest_load_pe("gta2.exe", &img);
     rt_log("image: entry %08X code %08X-%08X", img.entry, img.code_lo, img.code_hi);
     dmavideo_register();
+    d3ddll_register();
     imports_bind();
     recomp_dispatch_init();
     guest_tib_init();

@@ -20,6 +20,12 @@ int presenter_init(void *metal_layer, int width, int height);
  *   scene:    optional callback to draw 3D content beneath the 2D surface */
 void presenter_frame(const void *fb, uint32_t pitch, PresenterSceneFn scene, void *ctx);
 
+/* NDC rectangle (x0, y0, x1, y1) the game's screen maps to this frame (letterboxed). */
+void presenter_fit_rect(float out[4]);
+#ifdef __OBJC__
+id<MTLDevice> presenter_device(void);
+#endif
+
 int presenter_width(void);
 int presenter_height(void);
 void presenter_set_gamma(float r, float g, float b);
