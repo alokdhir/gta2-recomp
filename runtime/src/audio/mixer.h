@@ -24,6 +24,8 @@ void mixer_voice_free(int v);
 void mixer_voice_set_pcm(int v, const MxPcm *pcm);
 int mixer_voice_open_wav(int v, const char *host_path); /* 0 on failure */
 void mixer_voice_start(int v);
+/* Output frames rendered so far (44.1 kHz), for matching traces to a dump. */
+uint64_t mixer_out_frames(void);
 void mixer_voice_stop(int v);
 MxState mixer_voice_state(int v);
 void mixer_voice_rate(int v, uint32_t hz);           /* playback rate, 0 = source rate */

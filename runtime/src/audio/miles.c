@@ -184,8 +184,9 @@ static void AIL_set_sample_loop_block(void)
 static void trace_start(const char *what, uint32_t h)
 {
     static int n;
-    if (!getenv("GTA2_TRACE_AUDIO") || n++ >= 40) return;
-    rt_log("%s %08X fmt=%u addr=%08X len=%u rate=%u", what, h, MEM32(h + 12), MEM32(h + 16), MEM32(h + 20), MEM32(h + 24));
+    if (!getenv("GTA2_TRACE_AUDIO") || n++ >= 400) return;
+    rt_log("%s %08X fmt=%u addr=%08X len=%u rate=%u at %.3f s", what, h, MEM32(h + 12), MEM32(h + 16), MEM32(h + 20),
+           MEM32(h + 24), (double)mixer_out_frames() / 44100.0);
 }
 
 static void AIL_start_sample(void) { trace_start("start_sample", ARG(0)); mixer_voice_start(voice_of(ARG(0))); RETURN_STDCALL(0, 1); }

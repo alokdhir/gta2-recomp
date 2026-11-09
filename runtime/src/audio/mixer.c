@@ -37,6 +37,7 @@ typedef struct {
     int loops_left;        /* 0 = forever */
     uint32_t loop_start, loop_end; /* frames */
     float vol, pan;
+    char name[48]; /* for traces: stream file name, or "pcm" */
 } Voice;
 
 static Voice g_v[MAX_VOICES];
@@ -46,6 +47,9 @@ static int g_running, g_paused;
 static float g_master = 1.0f;
 static int g_trace;
 static int g_mute; /* GTA2_HEADLESS / GTA2_MUTE: mix as usual, output silence */
+static uint64_t g_out_frames; /* frames rendered so far */
+uint64_t mixer_out_frames(void) { return g_out_frames; }
+static FILE *g_dump; /* GTA2_AUDIO_DUMP=file: raw float32 stereo 44.1 kHz of the mix (first 2 min) */
 
 /* ---- IMA ADPCM (WAV format 0x11) ----------------------------------------- */
 
@@ -176,17 +180,40 @@ static OSStatus render(void *ref, AudioUnitRenderActionFlags *flags, const Audio
     os_unfair_lock_unlock(&g_lock);
     static double acc;
     static uint64_t frames, clipped;
-    for (UInt32 k = 0; k < 2 * nframes; k++) {
-        if (o[k] > 1 || o[k] < -1) clipped++;
-        o[k] = o[k] > 1 ? 1 : o[k] < -1 ? -1 : o[k];
-        acc += (double)o[k] * o[k];
+    /* Limiter: when overlapping sounds (level-start voice + music + effects)
+     * add up past full scale, turn the whole mix down smoothly (instant
+     * attack, ~150 ms release) instead of hard-clipping it into harsh noise. */
+    static float gain = 1.0f;
+    const float ceiling = 0.89f;                       /* about -1 dBFS */
+    const float release = 1.0f / (0.15f * (float)OUT_RATE);
+    for (UInt32 k = 0; k < nframes; k++) {
+        float l = o[2 * k], r = o[2 * k + 1];
+        float peak = fmaxf(fabsf(l), fabsf(r));
+        if (peak * gain > ceiling) gain = ceiling / peak;
+        else gain = fminf(1.0f, gain + release);
+        l *= gain, r *= gain;
+        if (fabsf(l) > 1 || fabsf(r) > 1) clipped++;
+        o[2 * k] = l > 1 ? 1 : l < -1 ? -1 : l;
+        o[2 * k + 1] = r > 1 ? 1 : r < -1 ? -1 : r;
+        acc += (double)o[2 * k] * o[2 * k] + (double)o[2 * k + 1] * o[2 * k + 1];
     }
     frames += nframes;
+    g_out_frames += nframes;
+    static uint64_t dumped;
+    if (g_dump && dumped < 120 * (uint64_t)OUT_RATE) {
+        fwrite(o, sizeof(float) * 2, nframes, g_dump);
+        dumped += nframes;
+        if (dumped >= 120 * (uint64_t)OUT_RATE) fflush(g_dump);
+    }
     if (g_mute) memset(o, 0, sizeof(float) * 2 * nframes);
-    if (g_trace && frames >= 2 * (uint64_t)OUT_RATE) {
+    if (g_trace && frames >= (uint64_t)OUT_RATE) {
         int active = 0;
         for (int i = 0; i < MAX_VOICES; i++) active += g_v[i].state == MX_PLAYING;
         rt_log("mixer: rms %.4f clipped %llu voices %d", sqrt(acc / (2.0 * frames)), (unsigned long long)clipped, active);
+        for (int i = 0; i < MAX_VOICES; i++)
+            if (g_v[i].state == MX_PLAYING)
+                rt_log("mixer:   voice %d %s vol %.2f rate %u", i, g_v[i].name[0] ? g_v[i].name : "pcm", g_v[i].vol,
+                       g_v[i].play_rate ? g_v[i].play_rate : g_v[i].src_rate);
         acc = 0; frames = 0; clipped = 0;
     }
     return noErr;
@@ -214,6 +241,10 @@ int mixer_init(void)
     g_running = 1;
     g_trace = getenv("GTA2_TRACE_AUDIO") != NULL;
     g_mute = getenv("GTA2_HEADLESS") != NULL || getenv("GTA2_MUTE") != NULL;
+    if (getenv("GTA2_AUDIO_DUMP")) {
+        g_dump = fopen(getenv("GTA2_AUDIO_DUMP"), "wb");
+        if (g_dump) setvbuf(g_dump, NULL, _IONBF, 0);
+    }
     rt_log("mixer: Core Audio output running at %.0f Hz", OUT_RATE);
     return 1;
 }
@@ -291,6 +322,8 @@ void mixer_voice_set_pcm(int v, const MxPcm *p)
 int mixer_voice_open_wav(int v, const char *path)
 {
     if (v < 0 || v >= MAX_VOICES || !g_v[v].in_use) return 0;
+    const char *base = strrchr(path, '/');
+    snprintf(g_v[v].name, sizeof g_v[v].name, "%s", base ? base + 1 : path);
     int fd = open(path, O_RDONLY);
     if (fd < 0) return 0;
     struct stat st;
