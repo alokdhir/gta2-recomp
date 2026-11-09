@@ -15,6 +15,7 @@
 
 #include "render3d/world3d.h"
 #include "render3d/world_data.h"
+#include "render/lights.h"
 #include "video/presenter.h"
 #include "win32/imports.h"
 #include "win32/win32.h"
@@ -201,12 +202,15 @@ static NSString *const kShaders =
     @"#include <metal_stdlib>\n"
      "using namespace metal;\n"
      "struct WVert { packed_float3 p; packed_float2 uv; float layer; float shade; };\n"
-     "struct Cam { float4 fit; float2 screen; float2 centre; packed_float3 cam; float f; float near_d; float far_d; };\n"
-     "struct VOut { float4 pos [[position]]; float2 uv; float layer [[flat]]; float shade; };\n"
+     "struct Cam { float4 fit; float2 screen; float2 centre; packed_float3 cam; float f; float near_d; float far_d;\n"
+     "             float ambient; int nlights; };\n"
+     "struct Light { packed_float3 p; float radius; float radius2; float intensity; packed_float3 rgb; };\n"
+     "struct VOut { float4 pos [[position]]; float2 uv; float layer [[flat]]; float shade; float3 world; };\n"
      "vertex VOut w_vs(uint vid [[vertex_id]], const device WVert *v [[buffer(0)]], constant Cam &c [[buffer(1)]]) {\n"
      "    WVert in = v[vid];\n"
      "    float3 p = float3(in.p);\n"
-     "    float3 cam = float3(c.cam);\n    float d = max(cam.z - p.z, 0.05);\n"
+     "    float3 cam = float3(c.cam);\n"
+     "    float d = max(cam.z - p.z, 0.05);\n"
      "    float2 s = c.centre + c.f * (p.xy - cam.xy) / d;\n"
      "    float2 t = s / c.screen;\n"
      "    float2 ndc = float2(mix(c.fit.x, c.fit.z, t.x), mix(c.fit.w, c.fit.y, t.y));\n"
@@ -216,12 +220,27 @@ static NSString *const kShaders =
      "    o.uv = float2(in.uv);\n"
      "    o.layer = in.layer;\n"
      "    o.shade = in.shade;\n"
+     "    o.world = p;\n"
      "    return o;\n"
      "}\n"
-     "fragment float4 w_fs(VOut in [[stage_in]], texture2d_array<float> t [[texture(0)]], sampler s [[sampler(0)]]) {\n"
-     "    float4 c = t.sample(s, in.uv, uint(in.layer));\n"
-     "    if (c.a < 0.5) discard_fragment();\n"
-     "    return float4(c.rgb * in.shade, 1);\n"
+     /* Lighting, per pixel, following the original renderer's rule: at full
+      * ambient (daylight) only the face's directional shade applies; below
+      * it, ambient + shade^2 * sum(light falloff * intensity * colour). */
+     "fragment float4 w_fs(VOut in [[stage_in]], texture2d_array<float> t [[texture(0)]], sampler s [[sampler(0)]],\n"
+     "                     constant Cam &c [[buffer(1)]], const device Light *lights [[buffer(2)]]) {\n"
+     "    float4 tex = t.sample(s, in.uv, uint(in.layer));\n"
+     "    if (tex.a < 0.5) discard_fragment();\n"
+     "    if (c.ambient >= 255.0) return float4(tex.rgb * in.shade, 1);\n"
+     "    float3 sum = float3(0);\n"
+     "    for (int i = 0; i < c.nlights; i++) {\n"
+     "        float3 dv = in.world - float3(lights[i].p);\n"
+     "        float d2 = dot(dv, dv);\n"
+     "        if (d2 > lights[i].radius2) continue;\n"
+     "        float f = (lights[i].radius - sqrt(d2)) / lights[i].radius;\n"
+     "        sum += max(f, 0.0) * lights[i].intensity * float3(lights[i].rgb);\n"
+     "    }\n"
+     "    float3 l = in.shade * in.shade * sum + c.ambient / 255.0;\n"
+     "    return float4(tex.rgb * min(l, float3(1.0)), 1);\n"
      "}\n";
 
 static int setup(void)
@@ -303,7 +322,9 @@ void world3d_draw(id<MTLRenderCommandEncoder> enc, const float fit[4])
         float fit[4];
         float screen[2], centre[2];
         float cam[3], f;
-        float near_d, far_d, pad[2];
+        float near_d, far_d;
+        float ambient;
+        int32_t nlights;
     } u;
     memcpy(u.fit, fit, sizeof u.fit);
     u.screen[0] = g_screen[0];
@@ -316,6 +337,14 @@ void world3d_draw(id<MTLRenderCommandEncoder> enc, const float fit[4])
     u.f = g_cam.f;
     u.near_d = 0.05f;
     u.far_d = g_cam.camz + 1.0f;
+    const GameLight *gl;
+    u.nlights = render_lights(&gl);
+    u.ambient = render_ambient();
+    /* Light: packed float3 position, radius, radius2, intensity, packed float3 colour = 36 bytes,
+     * the same as GameLight's field order. */
+    id<MTLBuffer> lb = [presenter_device() newBufferWithBytes:u.nlights ? (const void *)gl : (const void *)&u
+                                                       length:u.nlights ? sizeof(GameLight) * (size_t)u.nlights : 16
+                                                      options:MTLResourceStorageModeShared];
 
     id<MTLBuffer> vb = [presenter_device() newBufferWithBytes:g_mesh
                                                        length:sizeof *g_mesh * (size_t)g_nmesh
@@ -325,6 +354,8 @@ void world3d_draw(id<MTLRenderCommandEncoder> enc, const float fit[4])
     [enc setCullMode:MTLCullModeNone];
     [enc setVertexBuffer:vb offset:0 atIndex:0];
     [enc setVertexBytes:&u length:sizeof u atIndex:1];
+    [enc setFragmentBytes:&u length:sizeof u atIndex:1];
+    [enc setFragmentBuffer:lb offset:0 atIndex:2];
     [enc setFragmentTexture:g_tiles atIndex:0];
     [enc setFragmentSamplerState:g_samp atIndex:0];
     [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:(NSUInteger)g_nmesh];

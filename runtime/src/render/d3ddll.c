@@ -17,6 +17,7 @@
 
 #include "guest_memory.h"
 #include "render/render.h"
+#include "render/lights.h"
 #include "debug/watch.h"
 #include "render3d/world_data.h"
 #include "render3d/world3d.h"
@@ -131,14 +132,22 @@ static int texture_for(uint32_t rec)
  * inside its radius. The game supplies each vertex's world position in a
  * second 4-vertex array right after the screen vertices (x, y, z at +0x80). */
 
-typedef struct {
-    float x, y, z, radius, radius2, intensity, r, g, b;
-} Light;
+typedef GameLight Light;
 
 #define MAX_LIGHTS 256
 static Light g_lights[MAX_LIGHTS];
 static int g_nlights;
 static float g_ambient = 255.0f;
+
+/* The game switches ambient mid-frame (dark for the map, full for the HUD),
+ * so the 3D pass uses the level that was in effect while map tiles were drawn. */
+static float g_map_ambient = 255.0f;
+float render_ambient(void) { return g_map_ambient; }
+int render_lights(const GameLight **out)
+{
+    *out = g_lights;
+    return g_nlights;
+}
 
 static void gbh_ResetLights(void)
 {
@@ -173,8 +182,11 @@ static void gbh_SetAmbient(void)
     RETURN_STDCALL(0, 1);
 }
 
+static unsigned g_lit_verts;
+
 static uint32_t light_vertex(uint32_t base, uint8_t shade, const float *world)
 {
+    g_lit_verts++;
     float sr = 0, sg = 0, sb = 0;
     for (int i = 0; i < g_nlights; i++) {
         const Light *l = &g_lights[i];
@@ -236,6 +248,7 @@ static void dump_prim(uint32_t flags, uint32_t rec, uint32_t verts, unsigned n, 
  * each vertex at +0x80: feed the 3D camera fit, and in 3D mode don't draw them. */
 static int map_prim(uint32_t verts, unsigned n)
 {
+    g_map_ambient = g_ambient;
     for (unsigned i = 0; i < n; i++) {
         float sv[3], wv[3];
         memcpy(sv, GPTR(verts + 32u * i), 12);
@@ -564,7 +577,8 @@ static void gbh_BeginScene(void)
     watch_rearm();
     world_debug_dump();
     world3d_begin_frame(g_screen_w, g_screen_h);
-    if (g_frame % 100 == 0) rt_log("scene %u", g_frame);
+    if (g_frame % 100 == 0) rt_log("scene %u map-ambient %.1f lights %d lit-verts %u", g_frame, g_map_ambient, g_nlights, g_lit_verts);
+    g_lit_verts = 0;
     render_begin_frame();
     RETURN_STDCALL(0, 0);
 }
