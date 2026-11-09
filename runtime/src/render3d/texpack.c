@@ -63,7 +63,7 @@ uint32_t *texpack_sprite(uint64_t hash, int *w, int *h)
     return px;
 }
 
-void texpack_dump(uint64_t hash, const uint32_t *rgba, int w, int h)
+void texpack_dump(uint64_t hash, const uint32_t *rgba, int w, int h, int pal)
 {
     static const char *dir = (const char *)-1;
     if (dir == (const char *)-1) {
@@ -72,7 +72,7 @@ void texpack_dump(uint64_t hash, const uint32_t *rgba, int w, int h)
     }
     if (!dir) return;
     char file[1200];
-    snprintf(file, sizeof file, "%s/%016llX_%dx%d.png", dir, (unsigned long long)hash, w, h);
+    snprintf(file, sizeof file, "%s/%016llX_%dx%d_p%d.png", dir, (unsigned long long)hash, w, h, pal);
     struct stat sb;
     if (stat(file, &sb) == 0) return;
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();

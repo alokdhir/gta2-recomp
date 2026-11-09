@@ -129,7 +129,7 @@ static int texture_for(uint32_t rec)
     int uw = (int)w, uh = (int)h;
     if (g_tex_world && scale > 1) {
         uint64_t hash = texpack_hash(rgba, (int)w, (int)h);
-        texpack_dump(hash, rgba, (int)w, (int)h);
+        texpack_dump(hash, rgba, (int)w, (int)h, pal);
         up = texpack_sprite(hash, &uw, &uh);
     }
     if (!up && scale > 1) {

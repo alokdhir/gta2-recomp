@@ -21,8 +21,9 @@ Sprites (cars) are captured from the running game instead, so every colour
 remap and damage state the game produces is covered:
 
   GTA2_DUMP_SPRITES=<dump_dir> GTA2.app ...   (drive around)
-  texpack.py sprites-prep <dump_dir> <work_dir>
-      picks car-sized sprites (people are too small to gain from AI upscaling),
+  texpack.py sprites-prep <dump_dir> <work_dir> [--all]
+      picks car-sized sprites (people are too small to gain from AI upscaling;
+      --all takes every sprite in the folder, for a hand-picked set of objects),
       pads them and bleeds colour into the transparent area.
   realesrgan-ncnn-vulkan -i <work_dir>/in -o <work_dir>/out -n realesrgan-x4plus-anime -s 4
   texpack.py sprites-finish <work_dir> <pack_dir>
@@ -125,7 +126,7 @@ def is_car(w, h):
     return max(w, h) >= 40 and min(w, h) >= 20
 
 
-def sprites_prep(dump, work):
+def sprites_prep(dump, work, all_sizes=False):
     os.makedirs(f'{work}/in', exist_ok=True)
     os.makedirs(f'{work}/mask', exist_ok=True)
     done = set(os.listdir(f'{work}/in'))
@@ -133,9 +134,9 @@ def sprites_prep(dump, work):
     for f in sorted(os.listdir(dump)):
         if not f.endswith('.png'):
             continue
-        h16, dims = f[:-4].split('_')
+        h16, dims = f[:-4].split('_')[:2]
         w, h = map(int, dims.split('x'))
-        if not is_car(w, h) or f'{h16}.png' in done:
+        if (not all_sizes and not is_car(w, h)) or f'{h16}.png' in done:
             continue
         im = np.array(Image.open(f'{dump}/{f}').convert('RGBA'))
         mask = im[..., 3] > 0
@@ -169,7 +170,7 @@ if __name__ == '__main__':
     if len(sys.argv) >= 4 and sys.argv[1] == 'prep':
         prep(sys.argv[2], sys.argv[3])
     elif len(sys.argv) >= 4 and sys.argv[1] == 'sprites-prep':
-        sprites_prep(sys.argv[2], sys.argv[3])
+        sprites_prep(sys.argv[2], sys.argv[3], '--all' in sys.argv)
     elif len(sys.argv) >= 4 and sys.argv[1] == 'sprites-finish':
         sprites_finish(sys.argv[2], sys.argv[3])
     elif len(sys.argv) >= 5 and sys.argv[1] == 'finish':

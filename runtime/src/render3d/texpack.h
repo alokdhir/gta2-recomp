@@ -6,7 +6,8 @@
  *   textures/<style name>/sprites/<hash>.png   (any size; scaled to fit)
  *
  * GTA2_DUMP_SPRITES=<dir> writes each distinct world sprite the game draws as
- * <dir>/<hash>_<w>x<h>.png, the input for scripts/texpack.py sprites. */
+ * <dir>/<hash>_<w>x<h>_p<palette>.png, the input for scripts/texpack.py
+ * sprites (the palette id helps tell people from objects). */
 #pragma once
 #include <stdint.h>
 
@@ -17,4 +18,4 @@ uint64_t texpack_hash(const uint32_t *rgba, int w, int h);
 uint32_t *texpack_sprite(uint64_t hash, int *w, int *h);
 
 /* With GTA2_DUMP_SPRITES set, save this sprite once. */
-void texpack_dump(uint64_t hash, const uint32_t *rgba, int w, int h);
+void texpack_dump(uint64_t hash, const uint32_t *rgba, int w, int h, int pal);
