@@ -549,7 +549,9 @@ void user32_set_client_size(uint32_t hwnd, int width, int height)
         double k = fmin(want, fmin((vis.size.width - 40) / width, (vis.size.height - 60) / height));
         [win setContentSize:NSMakeSize(width * k, height * k)];
         [win center];
-        if (reg_get_dword("screen", "mac_fullscreen", 0) && width > 640) [win toggleFullScreen:nil];
+        /* never for test runs (GTA2_HEADLESS): full screen takes focus and starts Game Mode */
+        if (reg_get_dword("screen", "mac_fullscreen", 0) && width > 640 && !getenv("GTA2_HEADLESS"))
+            [win toggleFullScreen:nil];
     }
 }
 
