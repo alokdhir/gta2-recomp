@@ -259,10 +259,14 @@ static float wall_foot_ao(int fx, int fy, int z)
 
 static void wall_uv(uint16_t face, float ha, float hb, float uv[4][2])
 {
-    /* Upright, u from a (left as seen from outside) to b: what the original
-     * renderer produces for a face with no rotation or flip bits. The face's
-     * own flip and quarter turns apply on top of that. */
-    const float base[4][2] = { { 0, 1 - ha }, { 1, 1 - hb }, { 1, 1 }, { 0, 1 } };
+    /* Upright, u running left to right as seen from outside: what the
+     * original renderer produces for a face with no rotation or flip bits.
+     * Walls go a -> b with the outside on the viewer's side, which puts a on
+     * the viewer's RIGHT (y grows south), so u runs from b (0) to a (1).
+     * Text shows it: wil's JESUS SAVES sign read mirrored, its two tiles in
+     * swapped order, when u ran from a. The face's own flip and quarter turns
+     * apply on top of that. */
+    const float base[4][2] = { { 1, 1 - ha }, { 0, 1 - hb }, { 0, 1 }, { 1, 1 } };
     for (int i = 0; i < 4; i++) {
         float u = base[i][0], w = base[i][1];
         if (FACE_FLIP(face)) u = 1 - u;
@@ -296,9 +300,9 @@ static void push_wall_2s_ao(float ax, float ay, float bx, float by, float z, flo
     wall_uv(face, ha, hb, uv);
     unsigned tile2 = tile;
     if (FACE_TILE(back)) {
-        /* seen from behind, b is on the left: mirror, then the back face's own bits */
+        /* the back is the opposite side's own wall, b -> a: map it as that
+         * wall (heights swapped), then put its corners back on ours */
         wall_uv(back, hb, ha, uv2);
-        for (int i = 0; i < 4; i++) uv2[i][0] = 1 - uv2[i][0];
         float t[2];
         memcpy(t, uv2[0], 8); memcpy(uv2[0], uv2[1], 8); memcpy(uv2[1], t, 8);
         memcpy(t, uv2[2], 8); memcpy(uv2[2], uv2[3], 8); memcpy(uv2[3], t, 8);
