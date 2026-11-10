@@ -96,8 +96,12 @@ static void replay_record(id<MTLCommandBuffer> cb, id<MTLTexture> src)
     g_replay_count++;
 }
 
-/* Copy the ring out (oldest first) and write PNGs on a background queue. */
-static void replay_write(void)
+/* Hand the ring over (oldest first) to a background writer, which reads the
+ * pixels once the GPU has finished cb. Nothing here may block the game thread:
+ * the game makes up for a slow frame by running fast afterwards, so a save that
+ * waited on the GPU and copied 90 frames here (about 190 ms) caused the very
+ * speed burst it was meant to record. The ring starts over with new textures. */
+static void replay_write(id<MTLCommandBuffer> cb)
 {
     uint64_t n = g_replay_count < REPLAY_FRAMES ? g_replay_count : REPLAY_FRAMES;
     if (!n) return;
@@ -110,29 +114,34 @@ static void replay_write(void)
     snprintf(dir, sizeof dir, "%s/replay_%04d%02d%02d_%02d%02d%02d", base, tm.tm_year + 1900, tm.tm_mon + 1,
              tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
     mkdir(dir, 0755);
-    NSMutableArray *frames = [NSMutableArray array];
-    size_t w = 0, h = 0;
-    for (uint64_t i = 0; i < n; i++) {
-        id<MTLTexture> t = g_replay[(g_replay_count - n + i) % REPLAY_FRAMES];
-        w = t.width, h = t.height;
-        NSMutableData *d = [NSMutableData dataWithLength:w * h * 4];
-        [t getBytes:d.mutableBytes bytesPerRow:w * 4 fromRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0];
-        [frames addObject:d];
-    }
+    NSMutableArray<id<MTLTexture>> *frames = [NSMutableArray array];
+    for (uint64_t i = 0; i < n; i++) [frames addObject:g_replay[(g_replay_count - n + i) % REPLAY_FRAMES]];
+    for (int i = 0; i < REPLAY_FRAMES; i++) g_replay[i] = nil;
+    g_replay_count = 0;
     NSString *ns = [NSString stringWithUTF8String:dir];
     rt_log("presenter: saving replay (%llu frames) to %s", (unsigned long long)n, dir);
     if (!g_replay_group) {
         g_replay_group = dispatch_group_create();
         atexit(replay_wait);
     }
-    dispatch_group_async(g_replay_group, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        for (NSUInteger i = 0; i < frames.count; i++) {
-            char path[1200];
-            snprintf(path, sizeof path, "%s/frame_%03lu.png", ns.UTF8String, (unsigned long)i);
-            write_png_bytes(((NSMutableData *)frames[i]).mutableBytes, w, h, path);
-        }
-        rt_log("presenter: replay saved to %s", ns.UTF8String);
-    });
+    dispatch_group_t group = g_replay_group;
+    dispatch_group_enter(group);
+    [cb addCompletedHandler:^(id<MTLCommandBuffer> done) {
+        (void)done;
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            for (NSUInteger i = 0; i < frames.count; i++) {
+                id<MTLTexture> t = frames[i];
+                size_t w = t.width, h = t.height;
+                NSMutableData *d = [NSMutableData dataWithLength:w * h * 4];
+                [t getBytes:d.mutableBytes bytesPerRow:w * 4 fromRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0];
+                char path[1200];
+                snprintf(path, sizeof path, "%s/frame_%03lu.png", ns.UTF8String, (unsigned long)i);
+                write_png_bytes(d.mutableBytes, w, h, path);
+            }
+            rt_log("presenter: replay saved to %s", ns.UTF8String);
+            dispatch_group_leave(group);
+        });
+    }];
 }
 
 static void write_png(id<MTLTexture> t, const char *path)
@@ -421,13 +430,12 @@ void presenter_frame(const void *fb, uint32_t pitch, PresenterSceneFn scene, voi
         if (ab > 0 && (int)g_frame_no == ab + 2) ab_path = "ab_3d.png";
         int capture = (g_capture_path && ++g_frame_no == g_capture_frame) || ab_path;
         if (!g_layer.framebufferOnly) replay_record(cb, drawable.texture);
-        [cb presentDrawable:drawable];
-        [cb commit];
         if (g_replay_save) {
             g_replay_save = 0;
-            [cb waitUntilCompleted];
-            replay_write();
+            replay_write(cb);
         }
+        [cb presentDrawable:drawable];
+        [cb commit];
         if (capture) {
             [cb waitUntilCompleted];
             char path[1100];
