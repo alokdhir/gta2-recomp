@@ -144,15 +144,23 @@ void user32_action_toggle_renderer(void)
     user32_update_title();
 }
 
+int user32_debug(void)
+{
+    static int d = -1;
+    if (d < 0) d = getenv("GTA2_DEBUG") && *getenv("GTA2_DEBUG") && strcmp(getenv("GTA2_DEBUG"), "0") != 0;
+    return d;
+}
+
 void user32_action_snapshot(void)
 {
+    if (!user32_debug()) return;
     world3d_set(0); /* the probe reads the original renderer's stream */
     d3ddll_probe_next_frame();
     presenter_request_ab();
     user32_update_title();
 }
 
-void user32_action_replay(void) { presenter_save_replay(); }
+void user32_action_replay(void) { if (user32_debug()) presenter_save_replay(); }
 
 /* While a movie plays, presses only count as "skip" and never reach the game. */
 static int g_swallow_keys;
@@ -297,6 +305,7 @@ static void memsnap_write(const char *path)
 /* Debug menu / Cmd-4: save a memory snapshot now (numbered), for finding game state. */
 void user32_action_memsnap(void)
 {
+    if (!user32_debug()) return;
     static int n;
     const char *dir = getenv("GTA2_AB_DIR") ?: "captures";
     mkdir(dir, 0755);
@@ -454,23 +463,26 @@ void user32_init(void)
                                      keyEquivalent:@"f"];
         fs.keyEquivalentModifierMask = NSEventModifierFlagCommand;
         appItem.submenu = appMenu;
-        /* Debug menu: Cmd-1/2/3 (no fn key needed, and the game never uses Cmd) */
+        /* View menu: Cmd-1 switches renderer (no fn key needed, and the game never uses Cmd).
+         * Debug menu, with GTA2_DEBUG=1 only: Cmd-2/3/4. */
         g_actions = [GTA2Actions new];
-        NSMenuItem *dbgItem = [NSMenuItem new];
-        [bar addItem:dbgItem];
-        NSMenu *dbg = [[NSMenu alloc] initWithTitle:@"Debug"];
         struct { NSString *title, *key; SEL sel; } items[] = {
             { @"Switch Renderer (Original / 3D)", @"1", @selector(toggleRenderer:) },
             { @"Snapshot (A/B Screenshots + Map Log)", @"2", @selector(snapshot:) },
             { @"Save Instant Replay (Last 3 s)", @"3", @selector(replay:) },
             { @"Save Memory Snapshot", @"4", @selector(memsnap:) },
         };
-        for (size_t i = 0; i < 4; i++) {
-            NSMenuItem *it = [dbg addItemWithTitle:items[i].title action:items[i].sel keyEquivalent:items[i].key];
+        for (size_t i = 0; i < (user32_debug() ? 4u : 1u); i++) {
+            if (i == 0 || i == 1) {
+                NSMenuItem *mi = [NSMenuItem new];
+                [bar addItem:mi];
+                mi.submenu = [[NSMenu alloc] initWithTitle:i == 0 ? @"View" : @"Debug"];
+            }
+            NSMenu *m = bar.itemArray.lastObject.submenu;
+            NSMenuItem *it = [m addItemWithTitle:items[i].title action:items[i].sel keyEquivalent:items[i].key];
             it.target = g_actions;
             it.keyEquivalentModifierMask = NSEventModifierFlagCommand;
         }
-        dbgItem.submenu = dbg;
         NSApp.mainMenu = bar;
         [NSApp finishLaunching];
         if (!getenv("GTA2_HEADLESS")) [NSApp activateIgnoringOtherApps:YES];

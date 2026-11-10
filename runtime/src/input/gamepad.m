@@ -52,8 +52,8 @@ void gamepad_poll(void)
         rt_log("gamepad: %s", pad.vendorName.UTF8String ?: "controller");
         g_announced = 1;
     }
-    /* Developer combos: hold View (Back/Select/Share) and press LB = switch
-     * renderer, RB = snapshot, Y = instant replay. While View is held those
+    /* Combos: hold View (Back/Select/Share) and press LB = switch renderer;
+     * with GTA2_DEBUG=1 also RB = snapshot, Y = instant replay. While View is held those
      * buttons don't reach the game. */
     static int combo_prev[3];
     int view = g.buttonOptions.pressed;
@@ -66,7 +66,7 @@ void gamepad_poll(void)
         }
         combo_prev[i] = combo[i];
     }
-    /* PlayStation touchpad click (unused by GTA2): instant replay, easy to hit mid-drive */
+    /* PlayStation touchpad click (unused by GTA2): instant replay (GTA2_DEBUG=1), easy to hit mid-drive */
     static int pad_prev;
     int pad_click = 0;
     if ([g isKindOfClass:GCDualShockGamepad.class]) pad_click = ((GCDualShockGamepad *)g).touchpadButton.pressed;

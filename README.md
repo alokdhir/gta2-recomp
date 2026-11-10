@@ -2,6 +2,10 @@
 
 **GTA2** (PC, 1999) running natively on Apple Silicon Macs.
 
+| Original renderer | 3D renderer (⌘1) |
+|---|---|
+| ![The opening street in the original renderer](docs/original.jpg) | ![The same moment in the 3D renderer: real geometry, per-pixel lighting, shadows, upscaled textures](docs/3d.jpg) |
+
 `gta2.exe` is statically recompiled: its x86 code is translated ahead of time
 into C and compiled to arm64. Nothing is emulated. The Windows pieces the game
 leans on are rebuilt on Apple frameworks only, with no SDL or other third-party
@@ -134,16 +138,11 @@ On foot, the left stick points the player where you push it. To get the
 original tank-style turning back, set `mac_tank_controls` to `1` under
 `screen` in the registry plist.
 
-### Debug menu
+### Renderer
 
 | | Keys | Controller |
 |---|---|---|
-| Switch renderer: original 2D or 3D (remembered) | ⌘1 / F9 | View + LB |
-| Snapshot: original and 3D screenshots plus a map log | ⌘2 / F10 | View + RB |
-| Save instant replay: last 3 s as PNG frames | ⌘3 | View + Y, or touchpad click |
-| Save memory snapshot | ⌘4 | |
-
-Replays and snapshots go to `game_files/captures/`.
+| Switch renderer: original or 3D (remembered) | ⌘1 / F9 | View + LB |
 
 The 3D renderer draws the city as real geometry. It adds per-pixel lighting
 from the game's own lights, sky-light shadows, ambient occlusion, bloom and
@@ -162,6 +161,7 @@ above).
 | `GTA2_NO_PACK=1` | ignore texture packs |
 | `GTA2_NO_SHADOWS`, `GTA2_NO_AO`, `GTA2_NO_BLOOM`, `GTA2_NO_HALOS`, `GTA2_NO_EMISSIVE` | turn a 3D effect off, for comparison |
 | `GTA2_DUMP_SPRITES=dir` | capture sprites for texture packs |
+| `GTA2_DEBUG=1` | developer tools: a Debug menu with ⌘2 snapshot (original and 3D screenshots plus a map log; also F10, View + RB), ⌘3 instant replay of the last 3 s as PNG frames (also View + Y or the touchpad) and ⌘4 memory snapshot, all saved to `game_files/captures/` |
 | `GTA2_KEYS="3000:return,5000:up"` | scripted key presses (ms after start) |
 | `GTA2_CAPTURE=out.png GTA2_CAPTURE_FRAME=n` | save presented frame *n* |
 | `GTA2_DUMP_TILES=1` / `GTA2_DUMP_FRAME=n` | log every primitive of one scene |

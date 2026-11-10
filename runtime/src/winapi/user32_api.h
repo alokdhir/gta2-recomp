@@ -23,6 +23,9 @@ void user32_update_title(void);
 
 /* Developer actions (menu "Debug", Cmd-1/2/3, controller View + LB/RB/Y). */
 void user32_action_toggle_renderer(void); /* original <-> 3D */
+/* Developer tools (snapshot, replay, memory snapshot) exist only when the
+ * game is started with GTA2_DEBUG=1; otherwise these do nothing. */
+int user32_debug(void);
 void user32_action_snapshot(void);        /* A/B screenshots + map log of the next frame */
 void user32_action_replay(void);          /* save the last few seconds */
 void user32_action_memsnap(void);         /* save a memory snapshot */

@@ -10,6 +10,7 @@
 #include "video/presenter.h"
 #include "render3d/world3d.h"
 #include "winapi/imports.h"
+#include "winapi/user32_api.h"
 
 static id<MTLDevice> g_dev;
 static id<MTLCommandQueue> g_queue;
@@ -66,7 +67,7 @@ void presenter_save_replay(void) { g_replay_save = 1; }
 
 static void replay_record(id<MTLCommandBuffer> cb, id<MTLTexture> src)
 {
-    if (!g_copy || getenv("GTA2_HEADLESS")) return;
+    if (!g_copy || getenv("GTA2_HEADLESS") || !user32_debug()) return; /* a developer tool */
     static unsigned tick;
     if (tick++ & 1) return;
     NSUInteger w = src.width / 2, h = src.height / 2;
