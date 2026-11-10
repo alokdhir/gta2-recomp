@@ -396,6 +396,10 @@ static GTA2Actions *g_actions;
     key_event(e, 1);
 }
 - (void)keyUp:(NSEvent *)e { key_event(e, 0); }
+/* a click counts as a press while keys are swallowed (skips the intro movie) */
+- (void)mouseDown:(NSEvent *)e { if (g_swallow_keys) g_presses++; else [super mouseDown:e]; }
+- (void)rightMouseDown:(NSEvent *)e { if (g_swallow_keys) g_presses++; else [super rightMouseDown:e]; }
+- (void)otherMouseDown:(NSEvent *)e { if (g_swallow_keys) g_presses++; else [super otherMouseDown:e]; }
 - (void)flagsChanged:(NSEvent *)e
 {
     NSEventModifierFlags f = e.modifierFlags;

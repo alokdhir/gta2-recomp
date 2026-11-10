@@ -127,7 +127,7 @@ Settings are stored in `~/Library/Application Support/GTA2/registry.plist`.
 | Special | | Y, L3, R3 |
 | Previous / next weapon | Z / X | LB / RB |
 | Pause | Esc | Menu |
-| Skip intro movie | any key | any button |
+| Skip intro movie | any key or click | any button |
 | Full screen | ⌘F | |
 
 On foot, the left stick points the player where you push it. To get the
