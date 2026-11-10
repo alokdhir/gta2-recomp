@@ -11,8 +11,10 @@ $PY -m tools.pe_parser $EXE --json $G/gta2_analysis.json
 # recomp_stubs_unresolved.c and silently do nothing at run time (e.g. the
 # static constructor that fills the sprite-size table). Feed them back as
 # seeds and translate again until none are left (at most 3 passes).
+# Indirect-call targets can only be found at run time: the game records misses
+# in generated/icall_seeds.json; the known ones are kept in scripts/icall_seeds.json.
 for pass in 1 2 3; do
-    SEEDS=""
+    SEEDS="--seed-functions scripts/icall_seeds.json" # indirect-call targets found by playing (shipped)
     [ -s $G/icall_seeds.json ] && SEEDS="$SEEDS --seed-functions $G/icall_seeds.json"
     [ -s $G/stub_seeds.json ] && SEEDS="$SEEDS --seed-functions $G/stub_seeds.json"
     $PY -m tools.disasm $EXE --analysis-json $G/gta2_analysis.json -o $G/disasm --force $SEEDS
