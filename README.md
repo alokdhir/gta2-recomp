@@ -195,8 +195,30 @@ reading the original DLLs. The implementation is our own.
 
 ## Status
 
-Single-player works: menus, levels, sound and
-music, the intro movie, keyboard and controllers, and widescreen. Multiplayer (DirectPlay) is not supported.
+Single-player works: menus, levels, sound and music, the intro movie,
+keyboard and controllers, and widescreen. Multiplayer (DirectPlay) is not
+supported.
 
-GTA2 is © Rockstar Games / Take-Two Interactive. This project is not
-affiliated with or endorsed by them.
+## Credits
+
+- **GTA2** by DMA Design, published by Rockstar Games. GTA2 is © Rockstar
+  Games / Take-Two Interactive. This project is not affiliated with or
+  endorsed by them, and it contains none of their code or data.
+- [xboxrecomp](https://github.com/MattSG/xboxrecomp) (MIT) is the base of the
+  x86→C pipeline in `tools/`. Its licence is in `tools/xboxrecomp/LICENSE`.
+- [gta2-rtx-remix](https://github.com/gebdag/gta2-rtx-remix) (MIT) supplied
+  research on the renderer interface and the widescreen view technique.
+- [Capstone](https://www.capstone-engine.org/) (BSD) does the disassembly,
+  at build time only.
+- [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) (BSD-3-Clause) and
+  its [ncnn-vulkan port](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan)
+  (MIT) power the optional texture packs. They are downloaded at build time
+  and not redistributed here.
+- [FFmpeg](https://ffmpeg.org/) converts the intro movie once at setup, if
+  you have it installed.
+
+## License
+
+The code in this repository is MIT licensed; see `LICENSE`. Vendored code
+keeps its own licence (`tools/xboxrecomp/LICENSE`). The game and its data
+are not covered and are not included.
