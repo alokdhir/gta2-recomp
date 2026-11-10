@@ -2,10 +2,6 @@
 
 **GTA2** (PC, 1999) running natively on Apple Silicon Macs.
 
-| Original renderer | 3D renderer (⌘1) |
-|---|---|
-| ![The opening street in the original renderer](docs/original.jpg) | ![The same moment in the 3D renderer: real geometry, per-pixel lighting, shadows, upscaled textures](docs/3d.jpg) |
-
 `gta2.exe` is statically recompiled: its x86 code is translated ahead of time
 into C and compiled to arm64. Nothing is emulated. The Windows pieces the game
 leans on are rebuilt on Apple frameworks only, with no SDL or other third-party
