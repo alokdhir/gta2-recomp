@@ -73,3 +73,7 @@ set_target_properties(gta2 PROPERTIES
   MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/mac/Info.plist.in)
 add_custom_command(TARGET gta2 POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E create_symlink GTA2.app/Contents/MacOS/GTA2 ${CMAKE_BINARY_DIR}/gta2)
+
+# Finder caches the app icon until the bundle folder's own date changes, which
+# copying a new GTA2.icns into it does not do.
+add_custom_command(TARGET gta2 POST_BUILD COMMAND touch $<TARGET_BUNDLE_DIR:gta2> VERBATIM)
