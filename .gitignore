@@ -5,3 +5,5 @@
 .DS_Store
 /.venv/
 .claude/settings.local.json
+/.cache/
+__pycache__/

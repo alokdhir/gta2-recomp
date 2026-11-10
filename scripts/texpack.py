@@ -61,6 +61,8 @@ def chunks(path):
 
 def tiles(path):
     ch = chunks(path)
+    if b'TILE' not in ch:  # fstyle.sty (menus) has sprites only
+        return
     tile, ppal, palx = ch[b'TILE'], ch[b'PPAL'], ch[b'PALX']
     for t in range(len(tile) // (TILE * TILE)):
         phys = struct.unpack_from('<H', palx, 2 * t)[0]
