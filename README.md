@@ -17,6 +17,24 @@ runtime libraries:
 | Win32 (kernel32, user32, advapi32) | `runtime/src/winapi`: AppKit window, plist registry |
 | GTA2 Manager (options program) | native settings dialog |
 
+## What's new compared with the PC original
+
+- **Controller movement on foot that makes sense.** The original uses tank
+  controls: left and right rotate the player, and up walks forward. Here the
+  player faces wherever you push the left stick and walks that way. Cars, the
+  d-pad and the keyboard keep the original controls, and tank mode is a
+  setting away (see [Playing](#playing)).
+- **Widescreen** at any resolution. The game's visible area is widened too,
+  so cars and people don't pop in and out at the screen edges.
+- **An optional true-3D renderer.** It draws the city as real geometry, with
+  per-pixel lighting, shadows, ambient occlusion, bloom and upscaled textures,
+  including optional AI-upscaled packs. Switch between it and the original
+  look with ⌘1.
+- **Instant replay.** Save the last 3 seconds as frames with ⌘3 or the
+  touchpad.
+- **Native Mac app.** Settings dialog, full screen, controller support and an
+  app icon.
+
 ## Bring your own game
 
 This repository contains **no game code or data**. You need an installed copy
