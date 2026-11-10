@@ -30,8 +30,6 @@ runtime libraries:
   per-pixel lighting, shadows, ambient occlusion, bloom and upscaled textures,
   including optional AI-upscaled packs. Switch between it and the original
   look with ⌘1.
-- **Instant replay.** Save the last 3 seconds as frames with ⌘3 or the
-  touchpad.
 - **Native Mac app.** Settings dialog, full screen, controller support and an
   app icon.
 
